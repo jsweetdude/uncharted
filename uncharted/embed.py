@@ -363,6 +363,9 @@ def run(args: argparse.Namespace) -> int:
         try:
             with os.fdopen(handle, "wb") as fh:
                 write(fh)
+            umask = os.umask(0)
+            os.umask(umask)
+            os.chmod(tmp, 0o666 & ~umask)
             os.replace(tmp, path)
         finally:
             if os.path.exists(tmp):

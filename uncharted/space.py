@@ -122,10 +122,19 @@ def main() -> None:
     low = reducer10.fit_transform(matrix)
     log(f"umap 10-d in {time.time()-t0:.0f}s")
     mcs = args.min_cluster_size or max(5, int(math.sqrt(n) / 2))
-    labels = HDBSCAN(min_cluster_size=mcs, min_samples=args.min_samples).fit_predict(low)
+    labels = HDBSCAN(min_cluster_size=mcs, min_samples=args.min_samples, copy=True).fit_predict(low)
+    selection = "eom"
+    sizes = np.bincount(labels[labels >= 0]) if labels.max() >= 0 else np.zeros(0, dtype=int)
+    if len(sizes) < 3 or sizes.max() > 0.5 * n:
+        # HDBSCAN's default selection sometimes keeps one blob over most of the map; its leaf
+        # selection splits that blob into the dense regions inside it
+        leaf = HDBSCAN(min_cluster_size=mcs, min_samples=args.min_samples, cluster_selection_method="leaf", copy=True).fit_predict(low)
+        if leaf.max() + 1 > len(sizes):
+            log(f"default selection kept {len(sizes)} neighborhoods, the largest {sizes.max() if len(sizes) else 0} of {n} items; using leaf selection")
+            labels, selection = leaf, "leaf"
     n_clusters = int(labels.max()) + 1
     noise = int((labels == -1).sum())
-    log(f"hdbscan min_cluster_size={mcs} min_samples={args.min_samples}: {n_clusters} clusters, {noise} unclustered")
+    log(f"hdbscan min_cluster_size={mcs} min_samples={args.min_samples} selection={selection}: {n_clusters} clusters, {noise} unclustered")
 
     t0 = time.time()
     reducer2 = umap.UMAP(n_components=2, n_neighbors=15, min_dist=0.1, metric="cosine", random_state=args.seed)
@@ -196,6 +205,7 @@ def main() -> None:
             "seed": args.seed,
             "minClusterSize": mcs,
             "minSamples": args.min_samples,
+            "selection": selection,
             "clustering": "HDBSCAN on a 10-d UMAP (30 neighbors, min distance 0, cosine)",
             "layout": "2-d UMAP (15 neighbors, min distance 0.1, cosine)",
             "libraries": f"umap-learn {umap.__version__}, scikit-learn {sklearn.__version__}, numpy {np.__version__}",

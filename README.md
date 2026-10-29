@@ -18,6 +18,18 @@ The first local embedding run downloads `Qwen/Qwen3-Embedding-0.6B` (about 1.2 G
 
 Run scripts with `python -I` so downloaded corpus files can never shadow a module.
 
+## Map a new topic
+
+Three commands from the repository root, with `OPENALEX_API_KEY` set to a free key from openalex.org:
+
+    uv run python -I uncharted/estimate.py topics "haptic feedback"
+    uv run python -I uncharted/estimate.py scope --topic T11687 --name haptics --provider local --max-items 20000 --scope-out data/runs/haptics/scope.json
+    uv run --extra local python -I uncharted/run.py --yes --scope data/runs/haptics/scope.json
+
+`topics` lists the OpenAlex topics that match a phrase, with their ids and work counts (`--search` and `--filter` on `scope` take a title-and-abstract search or a raw OpenAlex filter instead). `scope` resolves the choice to the exact filter the run will use, samples 200 works to see how many survive cleaning and how long they are, and prints the estimate as JSON: items, requests, tokens and dollars as ranges, and the minutes for each stage. `--scope-out` writes the scope file with the caps the person approves: items, tokens and dollars. `run.py --yes` runs only an approved scope. It counts the works again and stops if the count moved more than 2%, then pulls, cleans, embeds, maps, finds candidate connections and writes `data/exports/<name>.json.gz`, stopping before any cap would be crossed; rerunning the same command resumes a stopped run. Exit status: 0 done; 3 a cap or the scope changed (estimate again); 4 the embedding provider refused (key, quota or input); 5 OpenAlex's daily budget is spent (run the command again tomorrow).
+
+For scale, on 2026-10-28 on an M3 Pro: the 20,000 most-cited works in OpenAlex's teleoperation and haptics topic estimated at $0.011 and 27 to 63 minutes with local embedding, or $0.61 to $0.98 and 3 to 18 minutes through OpenAI's large embedding model. A 300-work test of the same topic ran end to end in a minute and a half for $0.0003.
+
 ## Pipeline
 
 1. **Load** a corpus into `data/corpora/<name>.jsonl`. Every loader writes the same record:
@@ -27,7 +39,8 @@ Run scripts with `python -I` so downloaded corpus files can never shadow a modul
    `text` is what gets embedded (title + body). `tags` and `popularity` are optional signals used for neighborhood labels and ranking.
 
    - `uncharted/s2.py` — accessibility papers from Semantic Scholar's keyless bulk search (about one request a second; abstracts present for roughly half of matches).
-   - `uncharted/openalex.py` — the same from OpenAlex topic T12481 and four venues. OpenAlex charges per request ($0.0001 for a filter-only page of up to 200 records), and paging past the first 200 results needs a free API key: pass `--api-key` or set `OPENALEX_API_KEY`. The loader saves its cursor after every page; `--resume` continues an interrupted pull.
+   - `uncharted/openalex.py` — the same from OpenAlex topic T12481 and four venues, or any OpenAlex works filter with `--filter NAME=FILTER` (and `--max-items`, most-cited first). OpenAlex charges per request ($0.0001 for a filtered page of up to 200 records, ten times that for a search), and paging past the first 200 results needs a free API key: pass `--api-key` or set `OPENALEX_API_KEY`. The loader saves its cursor after every page; `--resume` continues an interrupted pull. `--corpus-info` writes the map manifest's sources section.
+   - `uncharted/clean.py` — drops non-research record types, texts under 25 words and repeated titles before anything is embedded, and records the rules in the corpus info file.
    - `uncharted/talks.py id24|axecon|csun` — conference talk abstracts from Inclusive Design 24 (2018 on), axe-con (the public content hub: recorded sessions, 2025 on) and CSUN (2023 and 2024 from csun.edu). Fetched pages are cached under `data/raw/`.
    - `uncharted/patents.py fetch|build` — US patent grants in streaming-media and accessibility CPC groups, from PatentsView's bulk tables (see Data sources). `fetch --citations` downloads `g_patent`, `g_patent_abstract`, `g_cpc_current`, `g_assignee_disambiguated` and `g_us_patent_citation` (about 4.9 GB zipped, sizes printed first); `build` streams them with the standard library and keeps utility patents carrying any CPC code in `SCOPE`: captions and teletext (`H04N21/4884`, `H04N7/088`), client synchronization, rendering and audio (`H04N21/430`, `/431`, `/439`), end-user applications, program guides and client configuration (`H04N21/47`, `/482`, `/485`), aids for blind and deaf people (`G09B21`), speech made visible or tactile (`G10L21/06`–`/18`, `G10L2021/065`, `/105`), phones for disabled users (`H04M1/72475`, `/72478`, `/72481`), devices operated by disabled people (`A61F4`), sound input and output (`G06F3/16`) and input arrangements (`G06F3/01`). Record: `id` the patent number, `venue` the first assignee, `tags` every current CPC code, `popularity` forward citations, `url` the Google Patents page. Abstracts repeated word for word by continuations collapse onto the earliest grant. Zenodo serves each file over one connection at 1 to 4 MB a second, so `fetch` can take 30 to 60 minutes; `build` takes about 8 minutes and writes 72,389 records from the 2024 release.
 

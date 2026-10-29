@@ -636,6 +636,9 @@ def main() -> None:
                     gz.write(payload)
             else:
                 fh.write(payload)
+        umask = os.umask(0)
+        os.umask(umask)
+        os.chmod(tmp, 0o666 & ~umask)  # mkstemp makes files private; a map file is meant to be read
         os.replace(tmp, args.out)
     except BaseException:
         if os.path.exists(tmp):
