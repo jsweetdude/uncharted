@@ -18,6 +18,14 @@ The first local embedding run downloads `Qwen/Qwen3-Embedding-0.6B` (about 1.2 G
 
 Run scripts with `python -I` so downloaded corpus files can never shadow a module.
 
+## Use it from Claude Code
+
+    git clone <repository URL> uncharted
+    cd uncharted
+    ln -s "$PWD/skill/uncharted" ~/.claude/skills/uncharted
+
+Then ask Claude Code to map a research topic, or type `/uncharted`. The skill finds the OpenAlex topic, asks where the embedding should run, shows the cost and time estimate, and runs nothing until you approve it; afterwards it can draft and verify the strongest candidate connections. It needs [uv](https://docs.astral.sh/uv/) and a free OpenAlex key in `OPENALEX_API_KEY`, plus `UNCHARTED_OPENAI_API_KEY` for OpenAI embeddings. Keys are read from the environment, never typed into the chat.
+
 ## Map a new topic
 
 Three commands from the repository root, with `OPENALEX_API_KEY` set to a free key from openalex.org:

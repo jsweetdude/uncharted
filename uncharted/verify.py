@@ -3,7 +3,9 @@
     python -I uncharted/verify.py --name papers data/gaps/x.cand1.md data/gaps/x.cand2.md --gap data/gaps/x.json
 
 A candidate file starts with a `# Title` line; the rest is the body. Each candidate is
-embedded (title + body, same model and settings as the corpus), then reported:
+embedded (title + body) through the same provider, model and settings as the corpus, so a
+corpus embedded through an API verifies through it too, at a few hundred tokens a draft.
+Each is then reported:
 
     nearest real items and their similarity, loneliness percentile against the corpus,
     the neighborhood it landed in, similarity to the gap point and to the blend point
@@ -27,11 +29,10 @@ os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 import sys  # noqa: E402
 
 import numpy as np  # noqa: E402
-import torch  # noqa: E402
-from sentence_transformers import SentenceTransformer  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # `python -I` leaves the script's directory off sys.path
 from drafts import embedded_text, read_candidate  # noqa: E402
+from embed import LocalProvider, OpenAIProvider, StopRun, VoyageProvider  # noqa: E402
 from gaps import Space, effective_target  # noqa: E402
 from provenance import corpus_fingerprint, text_sha256  # noqa: E402
 
@@ -63,18 +64,27 @@ def main() -> None:
         target_pct = args.target_pct
     target_sim = space.sim_for_pct(target_pct)
 
-    device = "mps" if torch.backends.mps.is_available() else "cpu"
-    model_kwargs = {"torch_dtype": torch.float16} if model_info.get("fp16") else {}
-    model = SentenceTransformer(model_info["model"], device=device, model_kwargs=model_kwargs)
-    model.max_seq_length = model_info.get("max_seq_length", 512)
+    # embed drafts exactly as the corpus was embedded: same provider, model, dimensions and limit
+    max_seq = int(model_info.get("max_seq_length", 512))
+    provider_name = model_info.get("provider", "local")
+    try:
+        if provider_name == "local":
+            provider = LocalProvider(model_info["model"], max_seq, model_info.get("precision") or ("float16" if model_info.get("fp16") else "auto"), 16)
+        else:
+            provider = {"openai": OpenAIProvider, "voyage": VoyageProvider}[provider_name](model_info["model"], int(model_info["dim"]), max_seq)
+    except StopRun as stop:
+        raise SystemExit(str(stop)) from None
 
     try:
         parsed = [read_candidate(p) for p in args.candidates]
-    except ValueError as exc:
-        raise SystemExit(str(exc)) from None
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"cannot read the draft: {exc}") from None
     fingerprint = corpus_fingerprint(space.meta, model_info)
     texts = [embedded_text(t, b) for t, b, _ in parsed]
-    vecs = model.encode(texts, normalize_embeddings=True, convert_to_numpy=True, show_progress_bar=False).astype(np.float32)
+    try:
+        vecs, _ = provider.embed(texts)
+    except StopRun as stop:
+        raise SystemExit(str(stop)) from None
 
     print(f"\ncorpus {space.name}: {space.n()} items; target nn1 ≤ {target_sim:.3f} (lonelier than {target_pct:.0f}%)\n")
     for path, (title, body, notes), text, v in zip(args.candidates, parsed, texts, vecs):
