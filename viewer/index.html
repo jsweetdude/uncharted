@@ -3,194 +3,60 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Uncharted map</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; worker-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>Uncharted</title>
+<meta name="description" content="Open an Uncharted map file to explore a field's neighborhoods and its candidate connections.">
 <link rel="icon" href="data:,">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Chakra+Petch:wght@500;600;700&family=Atkinson+Hyperlegible+Next:wght@400;600;700&family=Atkinson+Hyperlegible+Mono:wght@400;500&display=swap">
 <link rel="stylesheet" href="porcelain.css">
-<style>
-  /* Map marks. Categorical slots and the blue sequential ramp are a validated chart palette;
-     dark steps are chosen for the dark surface, not flipped. */
-  :root {
-    --map-c1: #2a78d6; --map-c2: #eb6834; --map-c3: #1baf7a; --map-c4: #eda100;
-    --map-c5: #e87ba4; --map-c6: #008300; --map-c7: #6250d6; --map-c8: #e34948;
-    --map-seq-1: #b7d3f6; --map-seq-2: #86b6ef; --map-seq-3: #5598e7; --map-seq-4: #2a78d6;
-    --map-seq-5: #1c5cab; --map-seq-6: #104281; --map-seq-7: #0d366b;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --map-c1: #3987e5; --map-c2: #d95926; --map-c3: #199e70; --map-c4: #c98500;
-      --map-c5: #d55181; --map-c6: #008300; --map-c7: #9085e9; --map-c8: #e66767;
-      --map-seq-1: #184f95; --map-seq-2: #1c5cab; --map-seq-3: #256abf; --map-seq-4: #3987e5;
-      --map-seq-5: #6da7ec; --map-seq-6: #9ec5f4; --map-seq-7: #cde2fb;
-    }
-  }
-  :root[data-theme="dark"] {
-    --map-c1: #3987e5; --map-c2: #d95926; --map-c3: #199e70; --map-c4: #c98500;
-    --map-c5: #d55181; --map-c6: #008300; --map-c7: #9085e9; --map-c8: #e66767;
-    --map-seq-1: #184f95; --map-seq-2: #1c5cab; --map-seq-3: #256abf; --map-seq-4: #3987e5;
-    --map-seq-5: #6da7ec; --map-seq-6: #9ec5f4; --map-seq-7: #cde2fb;
-  }
-
-  html, body { margin: 0; }
-  body { background: var(--pc-bg); }
-  .app { min-height: 100vh; display: flex; flex-direction: column; }
-
-  .app-head {
-    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
-    gap: var(--pc-space-3) var(--pc-space-5); padding: var(--pc-space-3) var(--pc-space-4);
-    border-bottom: 1px solid var(--pc-border); background: var(--pc-surface);
-  }
-  .app-head .title-row { display: flex; align-items: center; gap: var(--pc-space-4); flex-wrap: wrap; }
-  .corpus-switch { display: flex; align-items: center; gap: var(--pc-space-2); }
-  .corpus-switch .pc-select { width: auto; min-width: 11rem; }
-  .app-head .pc-stats { grid-template-columns: repeat(4, auto); border: 1px solid var(--pc-border); border-radius: var(--pc-radius-lg); }
-  .app-head .pc-stats > div { padding: 6px 12px; }
-
-  .layout { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--pc-space-4); padding: var(--pc-space-4); }
-  .map-panel { display: flex; flex-direction: column; gap: var(--pc-space-2); min-width: 0; }
-  .toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--pc-space-2); }
-  .toolbar .pc-seg { flex: 0 1 auto; }
-  .toolbar .pc-btn { min-width: 30px; }
-  .map-wrap {
-    position: relative; height: 62vh; min-height: 300px;
-    background: var(--pc-surface); border: 1px solid var(--pc-border); border-radius: var(--pc-radius-lg); overflow: hidden;
-  }
-  .map-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
-  .map-wrap canvas.is-dragging { cursor: grabbing; }
-  .map-wrap canvas:focus-visible { box-shadow: inset 0 0 0 2px var(--pc-cobalt); }
-  .map-hint { margin: 0; }
-  .map-stage { position: relative; display: flex; flex-direction: column; min-width: 0; }
-  .map-legend {
-    background: var(--pc-surface); border: 1px solid var(--pc-border); border-radius: var(--pc-radius-md);
-    padding: 7px 12px; font-size: var(--pc-fs-small);
-  }
-  .map-legend summary { cursor: pointer; width: fit-content; }
-  .map-legend[open] summary { margin-bottom: 8px; }
-  .map-legend .pc-hint { margin-top: 8px; }
-  .map-status {
-    position: absolute; top: 8px; left: 8px; z-index: 1; margin: 0; padding: 3px 7px;
-    background: var(--pc-surface); border: 1px solid var(--pc-border); border-radius: var(--pc-radius-sm);
-  }
-  .details h3 .mono { font-size: 0.85em; color: var(--pc-text); margin-right: 2px; }
-
-  .tooltip {
-    position: absolute; z-index: 2; max-width: min(340px, calc(100% - 16px)); pointer-events: none;
-    background: var(--pc-surface); color: var(--pc-text); border: 1px solid var(--pc-control-border); border-radius: var(--pc-radius-md);
-    padding: 6px 9px; font-size: var(--pc-fs-small); line-height: 1.4;
-  }
-  .tooltip strong { display: block; font-weight: 600; }
-  .tooltip span { display: block; color: var(--pc-muted); font-size: 12px; }
-
-  .side, .side-lists { display: flex; flex-direction: column; gap: var(--pc-space-3); min-width: 0; }
-  .side-lists > * { flex: none; }
-  .side .pc-card h2 { font-size: var(--pc-fs-h3); }
-  .card-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--pc-space-2); }
-
-  .details h3 { font-size: var(--pc-fs-h3); margin-bottom: var(--pc-space-2); overflow-wrap: anywhere; }
-  .details p { margin: 0 0 var(--pc-space-2); overflow-wrap: anywhere; }
-  .facts { display: grid; grid-template-columns: fit-content(45%) minmax(0, 1fr); gap: 4px 12px; margin: 0 0 var(--pc-space-3); font-size: var(--pc-fs-small); }
-  .facts dt { font: var(--pc-label-weight) var(--pc-fs-label)/1.6 var(--pc-font-label); text-transform: var(--pc-label-case); letter-spacing: var(--pc-label-track); color: var(--pc-muted); }
-  .facts dd { margin: 0; overflow-wrap: anywhere; }
-  .link-btn {
-    appearance: none; margin: 0; padding: 0; border: 0; background: none; cursor: pointer; text-align: left;
-    font: inherit; color: var(--pc-link); text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px;
-  }
-  .link-btn:hover { color: var(--pc-cobalt-hover); text-decoration-thickness: 2px; }
-  .sub-label { margin: var(--pc-space-3) 0 var(--pc-space-1); }
-  .tag-list { margin: 0; font-size: var(--pc-fs-small); }
-  .side .pc-card { grid-template-columns: minmax(0, 1fr); }
-
-  .row-list { list-style: none; margin: 0; padding: 0; }
-  .row-list > li + li { border-top: 1px solid var(--pc-border); }
-  .row-btn {
-    display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 2px 10px;
-    width: 100%; margin: 0; padding: 7px 14px; border: 0; border-left: 3px solid transparent;
-    background: transparent; color: var(--pc-text); font: inherit; font-size: var(--pc-fs-small); text-align: left; cursor: pointer;
-    transition: background-color var(--pc-dur-fast);
-  }
-  .row-btn:hover { background: var(--pc-fill); }
-  .row-btn[aria-pressed="true"] { background: var(--pc-cobalt-soft); border-left-color: var(--pc-cobalt); }
-  .row-btn:focus-visible { box-shadow: inset 0 0 0 2px var(--pc-cobalt); }
-  .row-btn .main { min-width: 0; }
-  .row-btn .main > span { display: block; }
-  .row-btn .sub { color: var(--pc-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .row-btn .num, .mono { font-family: var(--pc-font-data); font-variant-numeric: tabular-nums; font-size: 12.5px; }
-  .row-btn .num { color: var(--pc-muted); }
-  .row-btn.two-col { grid-template-columns: minmax(0, 1fr) auto; }
-  .inline-list .row-btn { padding-inline: 0 4px; border-left: 0; }
-  .inline-list { margin-bottom: var(--pc-space-2); }
-  .list-head { display: flex; justify-content: space-between; }
-
-  .swatch { width: 12px; height: 12px; border-radius: 2px; flex: none; }
-  .marker-icon { width: 16px; height: 16px; flex: none; color: var(--pc-text); }
-  .marker-icon.focus-icon, .row-btn .rank { color: var(--pc-cobalt); }
-  .row-btn .sub .pc-badge { font-size: var(--pc-fs-label); padding: 1px 4px; margin-right: 4px; vertical-align: 1px; }
-  .row-btn .draft-code { font-size: 12px; }
-  .legend-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: var(--pc-fs-small); }
-  .legend-rows li { display: flex; align-items: center; gap: 8px; }
-  .legend-dot { flex: none; width: 16px; height: 16px; display: grid; place-items: center; }
-  .legend-dot > span { display: block; border-radius: 50%; }
-  .legend-rows .num { margin-left: auto; color: var(--pc-muted); font-family: var(--pc-font-data); font-size: 12.5px; }
-
-  .search-results { list-style: none; margin: 0; padding: 0; }
-  .find .pc-field { gap: 4px; }
-
-  .message[hidden], .tooltip[hidden], [hidden] { display: none !important; }
-
-  .details h3:focus, #details-heading:focus { outline: none; }
-  #details-heading:focus-visible { box-shadow: var(--pc-focus-ring); }
-  .details h3:focus-visible { box-shadow: var(--pc-focus-ring); }
-
-  @media (min-width: 960px) {
-    .app { height: 100vh; min-height: 0; }
-    .layout { grid-template-columns: minmax(0, 1fr) 380px; grid-template-rows: minmax(0, 1fr); min-height: 0; }
-    .map-stage { flex: 1; min-height: 0; }
-    .map-wrap { flex: 1; height: auto; min-height: 0; }
-    .map-legend {
-      position: absolute; left: 10px; bottom: 10px; z-index: 1;
-      width: min(340px, calc(100% - 20px)); max-height: calc(100% - 20px); overflow-y: auto;
-    }
-    /* two scroll regions: details on top (at most half the column), the lists below */
-    .side { min-height: 0; }
-    .details-card { flex: 0 0 50%; min-height: 0; overflow-y: auto; }
-    .side-lists { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 2px; margin: -2px; }
-  }
-  @media (max-width: 959px) {
-    .map-wrap { height: auto; aspect-ratio: 1 / 1; max-height: 75vh; }
-    .map-legend { margin-top: var(--pc-space-2); }
-  }
-  @media (max-width: 520px) {
-    .app-head .pc-stats { grid-template-columns: repeat(2, auto); width: 100%; }
-    .toolbar .pc-seg { flex: 1 1 100%; }
-  }
-</style>
+<link rel="stylesheet" href="app.css">
 </head>
 <body class="pc" data-voice="crisp">
 <div class="app">
   <header class="app-head">
-    <div class="title-row">
-      <h1>Uncharted map</h1>
-      <div class="corpus-switch" id="corpus-switch" hidden>
-        <label for="corpus" class="pc-label">Corpus</label>
-        <select id="corpus" class="pc-select"></select>
+    <div class="title-block">
+      <h1 id="map-title" tabindex="-1">Uncharted</h1>
+      <p class="map-sub" id="map-sub" hidden></p>
+    </div>
+    <div class="import" id="import" hidden>
+      <div class="pc-btn-row">
+        <button type="button" class="pc-btn pc-btn--primary" id="open-file">Open a map file</button>
+        <button type="button" class="pc-btn" id="open-sample">Load the sample</button>
+        <input type="file" id="file-input" accept=".json,.gz,application/json,application/gzip" hidden>
       </div>
+      <p class="pc-hint import-note">Files are read in this browser and never uploaded.</p>
     </div>
     <dl class="pc-stats" id="stats" hidden>
       <div><dt>Items</dt><dd id="stat-items">–</dd></div>
       <div><dt>Neighborhoods</dt><dd id="stat-nb">–</dd></div>
-      <div><dt>Unclustered</dt><dd id="stat-unclustered">–</dd></div>
-      <div><dt>Gaps</dt><dd id="stat-gaps">–</dd></div>
+      <div><dt>Candidates</dt><dd id="stat-candidates">–</dd></div>
+      <div id="stat-drafts-box"><dt>Drafts</dt><dd id="stat-drafts">–</dd></div>
     </dl>
   </header>
 
-  <div class="pc-callout pc-callout--warning message" id="message" role="alert" hidden style="margin: 16px 16px 0;">
+  <div class="pc-callout pc-callout--warning message" id="message" role="alert" hidden>
     <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 15 14H1L8 1.5Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 6v3.5M8 11.5v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
     <div id="message-text"></div>
   </div>
 
-  <main class="layout" id="layout">
+  <main class="main" id="main">
+  <section class="start" id="start" aria-labelledby="start-heading">
+    <div class="pc-card start-card">
+      <h2 id="start-heading">Open a map file</h2>
+      <p>Choose an Uncharted map file (.json or .json.gz) made by the Uncharted pipeline, or drop one anywhere on this page.</p>
+      <div class="drop-hint">Drop a map file here</div>
+      <div class="pc-btn-row">
+        <button type="button" class="pc-btn pc-btn--primary" id="start-open">Open a map file</button>
+        <button type="button" class="pc-btn" id="start-sample">Load the sample: 12 invented talks</button>
+      </div>
+      <p class="pc-hint">Files are read in this browser and never uploaded.</p>
+    </div>
+  </section>
+
+  <div class="layout" id="layout" hidden>
     <section class="map-panel" aria-labelledby="map-heading">
       <h2 id="map-heading" class="pc-visually-hidden">Map</h2>
       <div class="toolbar">
@@ -202,61 +68,117 @@
           <button type="button" class="pc-btn" id="zoom-in" aria-label="Zoom in">+</button>
           <button type="button" class="pc-btn" id="zoom-out" aria-label="Zoom out">&minus;</button>
           <button type="button" class="pc-btn" id="zoom-reset">Fit map</button>
+          <button type="button" class="help-btn" aria-expanded="false" aria-controls="help-map" aria-label="What the map shows">?</button>
         </div>
+      </div>
+      <div class="help-pop" id="help-map" hidden>
+        <p>Every dot is one item in the collection, such as a talk or a paper, placed so that items about similar things sit close together. Clusters of dots are neighborhoods. The outlined shapes are candidate connections: spots where the collection has little or nothing, between subjects it does cover.</p>
+        <p>Drag to move, scroll or pinch to zoom, and pick a shape to see what surrounds it. Distances on this flat map are only rough; every number in the details is measured on the full meaning of each text.</p>
       </div>
       <div class="map-stage">
         <div class="map-wrap" id="map-wrap">
-          <canvas id="map" tabindex="0" role="img" aria-label="Map"></canvas>
+          <canvas id="map" tabindex="0" role="img" aria-label="Map" aria-describedby="map-hint"></canvas>
           <div class="tooltip" id="tooltip" hidden></div>
           <p class="map-status pc-label" id="map-status" role="status" hidden></p>
         </div>
         <details class="map-legend" id="legend-box" open>
           <summary class="pc-label">Legend</summary>
+          <div class="legend-head"><button type="button" class="help-btn" aria-expanded="false" aria-controls="help-legend" aria-label="How to read the legend">?</button></div>
+          <div class="help-pop" id="help-legend" hidden>
+            <p>Shapes are candidate connections, filled squares are drafts that passed, hollow squares are drafts to try again. Colors only tell neighboring neighborhoods apart and repeat across the map; the names on the map and in the lists say which is which. In loneliness mode, darker and larger dots have fewer close neighbors.</p>
+          </div>
           <div id="legend"></div>
         </details>
       </div>
-      <p class="map-hint pc-hint">Drag to pan, scroll or pinch to zoom. With the map focused, arrow keys pan, + and − zoom, and 0 fits the map. Esc clears the details.</p>
+      <p class="map-hint pc-hint" id="map-hint">Drag to pan, scroll or pinch to zoom.<span class="hint-keys"> With the map focused, arrow keys pan, + and − zoom, 0 fits the map, and N and P step through candidates. Esc steps back.</span></p>
     </section>
 
-    <aside class="side" aria-label="Map details and lists">
+    <aside class="side" aria-label="Details and lists">
       <section class="pc-card details-card" id="details-card" aria-labelledby="details-heading">
         <div class="card-head">
           <h2 id="details-heading" tabindex="-1">Details</h2>
           <button type="button" class="pc-btn pc-btn--ghost" id="details-clear" hidden>Clear</button>
+          <button type="button" class="help-btn" aria-expanded="false" aria-controls="help-details" aria-label="How to read the details">?</button>
         </div>
-        <div class="details" id="details">
-          <p class="pc-muted">Pick a gap from the Gaps list or the map to see what surrounds it. Select any point for its details.</p>
+        <div class="help-pop" id="help-details" hidden>
+          <p>Shows whatever you picked last: an item, a candidate connection, a draft or a neighborhood. Similarity runs from −1 to 1, and higher means closer in meaning; the corpus median beside it is a yardstick. A loneliness percentile of 95 means emptier than 95% of the items. "Must not copy" lists the existing items closest to a candidate, numbered as on the map: a new idea there should not repeat them. Every measurement compares against this collection only; the "?" by Candidate connections says what "Pair test" means.</p>
         </div>
+        <div class="details" id="details"><p class="empty">Pick a candidate connection to see what surrounds it, or select any point.</p></div>
       </section>
 
       <div class="side-lists">
-      <section class="pc-card" aria-labelledby="gaps-heading">
-        <h2 id="gaps-heading">Gaps</h2>
-        <div class="list-head pc-label" aria-hidden="true"><span>Gap</span><span>Loneliness percentile</span></div>
-        <ul class="row-list pc-flush" id="gap-list" aria-labelledby="gaps-heading"></ul>
-      </section>
+        <section class="pc-card find" aria-labelledby="find-heading">
+          <div class="card-head">
+            <h2 id="find-heading">Find an item</h2>
+            <button type="button" class="help-btn" aria-expanded="false" aria-controls="help-find" aria-label="How search works">?</button>
+          </div>
+          <div class="help-pop" id="help-find" hidden>
+            <p>Type part of a title to list matching items. Pick one to see its details and center the map on it. "Show 25 more" pages through long lists of matches.</p>
+          </div>
+          <div class="pc-field">
+            <label for="find" class="pc-visually-hidden">Title contains</label>
+            <input id="find" class="pc-input" type="search" placeholder="Title contains…" autocomplete="off" aria-describedby="find-status">
+            <span class="pc-hint" id="find-status" aria-live="polite"></span>
+          </div>
+          <ul class="search-results row-list pc-flush" id="find-results" aria-label="Matching items" hidden></ul>
+        </section>
 
-      <section class="pc-card" aria-labelledby="nb-heading">
-        <h2 id="nb-heading">Neighborhoods</h2>
-        <div class="list-head pc-label" aria-hidden="true"><span>Neighborhood</span><span>Items</span></div>
-        <ul class="row-list pc-flush" id="nb-list" aria-labelledby="nb-heading"></ul>
-      </section>
+        <section class="pc-card" aria-labelledby="cand-heading">
+          <div class="card-head">
+            <h2 id="cand-heading">Candidate connections</h2>
+            <button type="button" class="help-btn" aria-expanded="false" aria-controls="help-cand" aria-label="What candidate connections are">?</button>
+          </div>
+          <div class="help-pop" id="help-cand" hidden>
+            <p>Each entry is a spot where this collection has little or nothing written, next to subjects it does cover. A connection mixes one item from each of two related neighborhoods and is kept when mixtures from that pair land in emptier space than comparable mixtures. A pair sits between two related neighborhoods; a blend mixes chosen items. Entries marked "not on the map" have neighbors too scattered to place.</p>
+            <p>"Passed both ways" means the pair stayed empty whether the check set aside the parent items' closest neighbors or only the parents. "Weaker evidence" means it stayed empty only with those neighbors set aside, and they may already be work that joins the two subjects.</p>
+            <p>Everything here is measured against this collection only. A spot can be empty because nobody has tried it, because the collection is missing the work, because descriptions are short, or because the mix makes no sense. Treat it as a place to look, not proof that an idea is new or good: read what surrounds it and search beyond this collection before writing anything.</p>
+          </div>
+          <div class="list-head pc-label" aria-hidden="true"><span>Candidate</span><span>Loneliness percentile</span></div>
+          <ul class="row-list pc-flush" id="cand-list" aria-labelledby="cand-heading"></ul>
+        </section>
 
-      <section class="pc-card find" aria-labelledby="find-heading">
-        <h2 id="find-heading">Find an item</h2>
-        <div class="pc-field">
-          <label for="find" class="pc-visually-hidden">Title contains</label>
-          <input id="find" class="pc-input" type="search" placeholder="Title contains…" autocomplete="off" aria-describedby="find-status">
-          <span class="pc-hint" id="find-status" aria-live="polite"></span>
-        </div>
-        <ul class="search-results row-list pc-flush" id="find-results" aria-label="Matching items" hidden></ul>
-      </section>
+        <section class="pc-card" id="drafts-card" aria-labelledby="drafts-heading" hidden>
+          <div class="card-head">
+            <h2 id="drafts-heading">Drafts</h2>
+            <button type="button" class="help-btn" aria-expanded="false" aria-controls="help-drafts" aria-label="What drafts are">?</button>
+          </div>
+          <div class="help-pop" id="help-drafts" hidden>
+            <p>Drafts are texts someone wrote for a candidate connection and then measured against the collection. Passed means the draft landed in empty space and stayed on topic. Retry lists what was too close to existing items or too far from the candidate.</p>
+          </div>
+          <ul class="row-list pc-flush" id="draft-list" aria-labelledby="drafts-heading"></ul>
+        </section>
+
+        <section class="pc-card" aria-labelledby="nb-heading">
+          <div class="card-head">
+            <h2 id="nb-heading">Neighborhoods</h2>
+            <button type="button" class="help-btn" aria-expanded="false" aria-controls="help-nb" aria-label="What neighborhoods are">?</button>
+          </div>
+          <div class="help-pop" id="help-nb" hidden>
+            <p>Groups of items about similar things, found without being told the topics. The words are the ones most typical of each group's titles. Pick one to light it up on the map and see its most central items. Items in no neighborhood are drawn in gray.</p>
+          </div>
+          <div class="list-head pc-label" aria-hidden="true"><span>Neighborhood</span><span>Items</span></div>
+          <ul class="row-list pc-flush" id="nb-list" aria-labelledby="nb-heading"></ul>
+        </section>
+
+        <section class="pc-card about" aria-labelledby="about-heading">
+          <div class="card-head">
+            <h2 id="about-heading">About this map</h2>
+            <button type="button" class="help-btn" aria-expanded="false" aria-controls="help-about" aria-label="Why the map's sources matter">?</button>
+          </div>
+          <div class="help-pop" id="help-about" hidden>
+            <p>Where the items came from, when they were collected, and which embedding model measured them. Maps made with different models or settings cannot be compared, even when they hold the same items.</p>
+          </div>
+          <div id="about"></div>
+        </section>
       </div>
     </aside>
+  </div>
   </main>
+
+  <div class="drop-overlay" id="drop-overlay" hidden><p>Drop the map file to open it</p></div>
   <div class="pc-visually-hidden" id="announce" aria-live="polite"></div>
 </div>
-<script src="data/index.js"></script>
+<script src="mapfile.js"></script>
 <script src="map.js"></script>
 </body>
 </html>
