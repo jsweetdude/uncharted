@@ -12,13 +12,17 @@ import { createServer } from "node:http";
 import { readFileSync, readdirSync, existsSync, mkdirSync } from "node:fs";
 import { extname, join, dirname, normalize } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { gunzipSync } from "node:zlib";
+import { gunzipSync, gzipSync } from "node:zlib";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const SITE = join(ROOT, "viewer");
 const EXAMPLES = join(ROOT, "schema", "examples");
 const EXPECTED = JSON.parse(readFileSync(join(EXAMPLES, "expected-errors.json"), "utf8"));
-const TALKS = join(ROOT, "data", "exports", "talks.json.gz");
+// The newest talks export, as a gzip upload; the plain file is the current one when both are present.
+const TALKS_JSON = join(ROOT, "data", "exports", "talks.json");
+const TALKS_GZ = join(ROOT, "data", "exports", "talks.json.gz");
+const TALKS_BYTES = existsSync(TALKS_JSON) ? readFileSync(TALKS_JSON) : existsSync(TALKS_GZ) ? gunzipSync(readFileSync(TALKS_GZ)) : null;
+const TALKS = TALKS_BYTES && { name: "talks.json.gz", mimeType: "application/gzip", buffer: gzipSync(TALKS_BYTES) };
 const SHOTS = process.env.SCREENSHOT_DIR;
 const PERF = process.env.UNCHARTED_PERF_MAP;
 
@@ -96,12 +100,36 @@ const title = (page) => page.$eval("#map-title", (h) => h.textContent);
 
   await openFile(page, join(EXAMPLES, "small.json"));
   check("a valid file opens after a hostile one", (await title(page)) === "Sample talks (invented)" && !(await message(page)));
-  if (existsSync(TALKS)) {
-    const talks = JSON.parse(gunzipSync(readFileSync(TALKS)).toString("utf8"));
+  if (TALKS) {
+    const talks = JSON.parse(TALKS_BYTES.toString("utf8"));
     await openFile(page, TALKS);
     const counts = await page.evaluate(() => [document.querySelector("#stat-items").textContent, document.querySelectorAll("#cand-list button").length, document.querySelector("#map-title").textContent]);
     check("a gzip export opens and replaces the previous map", counts[0] === talks.items.count.toLocaleString("en-US") && counts[1] === talks.candidates.length && counts[2] === talks.title, counts.join(" / "));
+
+    // Connections tested both ways say how they passed; one-way passes are marked weaker in the list and the details.
+    const cut = talks.manifest.candidates ? talks.manifest.candidates.pairCutoff : undefined;
+    const tested = typeof cut === "number" ? talks.candidates.filter((c) => c.kind === "connection" && typeof c.score.pairPParentsOnly === "number") : [];
+    if (tested.length) {
+      const isWeak = (c) => !(c.score.pairPParentsOnly < cut);
+      const rows = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll("#cand-list .row-btn")].map((b) => [b.dataset.code, b.textContent.includes("weaker evidence")])));
+      const listOk = talks.candidates.every((c) => rows[c.code] === (tested.includes(c) && isWeak(c)));
+      const pick = async (c) => { await page.click(`#cand-list .row-btn[data-code="${c.code}"]`); return page.$eval("#details", (d) => d.textContent); };
+      const both = tested.find((c) => !isWeak(c)), weak = tested.find(isWeak);
+      const bothText = both ? await pick(both) : "Passed both waysDifferent parents used";
+      const weakText = weak ? await pick(weak) : "Passed one way only";
+      if (weak && SHOTS) { mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: join(SHOTS, "weaker-evidence-1440-light.png") }); }
+      check("connections say how their pair test passed, and one-way passes read as weaker", listOk && bothText.includes("Passed both ways") && bothText.includes("Different parents used") && weakText.includes("Passed one way only"),
+        `${tested.length} tested, ${tested.filter(isWeak).length} one way only`);
+    }
   }
+
+  // A score number this viewer has no label for still shows, under its own name.
+  const extra = JSON.parse(readFileSync(join(EXAMPLES, "small.json"), "utf8"));
+  extra.candidates[0].score.newMeasure = 0.4321;
+  await openFile(page, { name: "extra.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(extra)) });
+  await page.click(`#cand-list .row-btn[data-code="${extra.candidates[0].code}"]`);
+  const extraText = await page.$eval("#details", (d) => d.textContent);
+  check("an unknown score number shows under its own name", extraText.includes("newMeasure") && extraText.includes("0.4321"));
   // A file dropped anywhere on the page opens the same way.
   const dropped = await page.evaluate(async () => {
     const blob = await (await fetch("samples/small.json")).blob();
@@ -159,7 +187,7 @@ const title = (page) => page.$eval("#map-title", (h) => h.textContent);
 }
 
 // 2b. Search reaches every match; the address's candidate opens only with the first map
-if (existsSync(TALKS)) {
+if (TALKS) {
   const page = await newPage();
   await page.goto(`${BASE}#%`);
   await openFile(page, TALKS);
@@ -224,7 +252,7 @@ if (PERF && existsSync(PERF)) {
 // 4. Screenshots
 if (SHOTS) {
   mkdirSync(SHOTS, { recursive: true });
-  const map = existsSync(TALKS) ? TALKS : join(EXAMPLES, "small.json");
+  const map = TALKS || join(EXAMPLES, "small.json");
   for (const [w, h] of [[1440, 900], [375, 812]]) {
     for (const scheme of ["light", "dark"]) {
       const page = await newPage({ width: w, height: h }, scheme);

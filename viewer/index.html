@@ -101,7 +101,7 @@
           <button type="button" class="help-btn" aria-expanded="false" aria-controls="help-details" aria-label="How to read the details">?</button>
         </div>
         <div class="help-pop" id="help-details" hidden>
-          <p>Shows whatever you picked last: an item, a candidate connection, a draft or a neighborhood. Similarity runs from −1 to 1, and higher means closer in meaning; the corpus median beside it is a yardstick. A loneliness percentile of 95 means emptier than 95% of the items. "Must not copy" lists the existing items closest to a candidate, numbered as on the map: a new idea there should not repeat them.</p>
+          <p>Shows whatever you picked last: an item, a candidate connection, a draft or a neighborhood. Similarity runs from −1 to 1, and higher means closer in meaning; the corpus median beside it is a yardstick. A loneliness percentile of 95 means emptier than 95% of the items. "Must not copy" lists the existing items closest to a candidate, numbered as on the map: a new idea there should not repeat them. Every measurement compares against this collection only; the "?" by Candidate connections says what "Pair test" means.</p>
         </div>
         <div class="details" id="details"><p class="empty">Pick a candidate connection to see what surrounds it, or select any point.</p></div>
       </section>
@@ -129,7 +129,9 @@
             <button type="button" class="help-btn" aria-expanded="false" aria-controls="help-cand" aria-label="What candidate connections are">?</button>
           </div>
           <div class="help-pop" id="help-cand" hidden>
-            <p>Each entry is a spot where the collection has little or nothing written, next to subjects it does cover. A connection mixes one item from each of two related neighborhoods and is kept only when that pair is emptier than chance; a pair sits between two related neighborhoods; a blend mixes chosen items. An empty spot is not a good idea by itself: read what surrounds it and search beyond this collection before writing anything. Entries marked "not on the map" have neighbors too scattered to place.</p>
+            <p>Each entry is a spot where this collection has little or nothing written, next to subjects it does cover. A connection mixes one item from each of two related neighborhoods and is kept when mixtures from that pair land in emptier space than comparable mixtures. A pair sits between two related neighborhoods; a blend mixes chosen items. Entries marked "not on the map" have neighbors too scattered to place.</p>
+            <p>"Passed both ways" means the pair stayed empty whether the check set aside the parent items' closest neighbors or only the parents. "Weaker evidence" means it stayed empty only with those neighbors set aside, and they may already be work that joins the two subjects.</p>
+            <p>Everything here is measured against this collection only. A spot can be empty because nobody has tried it, because the collection is missing the work, because descriptions are short, or because the mix makes no sense. Treat it as a place to look, not proof that an idea is new or good: read what surrounds it and search beyond this collection before writing anything.</p>
           </div>
           <div class="list-head pc-label" aria-hidden="true"><span>Candidate</span><span>Loneliness percentile</span></div>
           <ul class="row-list pc-flush" id="cand-list" aria-labelledby="cand-heading"></ul>

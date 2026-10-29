@@ -143,9 +143,12 @@ test("the viewer's copies of the schema and the sample match their sources", () 
   assert.deepEqual(readFileSync(join(ROOT, "viewer", "samples", "small.json")), readFileSync(join(EXAMPLES, "small.json")));
 });
 
-test("the real talks export validates when it is present", async (t) => {
-  let bytes;
-  try { bytes = readFileSync(join(ROOT, "data", "exports", "talks.json.gz")); } catch { t.skip("data/exports/talks.json.gz is not here"); return; }
-  const r = await M.readMapFile(blobOf(bytes), SCHEMA);
-  assert.equal(r.error, undefined, r.error);
+test("every export in data/exports validates when there are any", async (t) => {
+  let names;
+  try { names = readdirSync(join(ROOT, "data", "exports")).filter((f) => /\.json(\.gz)?$/.test(f)); } catch { names = []; }
+  if (!names.length) { t.skip("data/exports holds no map files"); return; }
+  for (const name of names) {
+    const r = await M.readMapFile(blobOf(readFileSync(join(ROOT, "data", "exports", name))), SCHEMA);
+    assert.equal(r.error, undefined, `${name}: ${r.error}`);
+  }
 });

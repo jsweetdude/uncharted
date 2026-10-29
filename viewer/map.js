@@ -16,7 +16,7 @@
   const BIN_SCALE = [1, 1, 1, 1, 1.6, 1.9, 2.2];
   const QUIET_ALPHA = { dense: [0.3, 0.42, 0.58, 0.75], sparse: [0.55, 0.68, 0.82, 0.9] };
   const KIND_NAMES = { connection: "Connection", pair: "Pair", blend: "Blend" };
-  const KIND_HINTS = { connection: "mix of two related neighborhoods, emptier than chance", pair: "between two related neighborhoods", blend: "mix of chosen items" };
+  const KIND_HINTS = { connection: "mix of two related neighborhoods, emptier than comparable pairs", pair: "between two related neighborhoods", blend: "mix of chosen items" };
   const VERDICT_NAMES = { pass: "Passed", retry: "Retry" };
   const SAMPLES = [{ id: "small", file: "samples/small.json", name: "the sample: 12 invented talks" }];
   const EMPTY_DETAILS = "Pick a candidate connection to see what surrounds it, or select any point.";
@@ -234,8 +234,17 @@
     }
     return f;
   }
+  function pairCut() {
+    const p = S.d.manifest.candidates;
+    return p && typeof p.pairCutoff === "number" ? p.pairCutoff : undefined;
+  }
+  // Whether a connection's pair was tested both ways: with its parents' nearest neighbors left out, and with only its parents.
+  const testedBothWays = (c) => c.kind === "connection" && typeof c.score.pairPParentsOnly === "number" && pairCut() !== undefined;
+  // Passed only with the neighbors left out, not with the parents alone.
+  const oneWay = (c) => testedBothWays(c) && !(c.score.pairPParentsOnly < pairCut());
   function candSubline(c) {
     const parts = [KIND_NAMES[c.kind]];
+    if (oneWay(c)) parts.push("weaker evidence");
     if (c.x === null) parts.push("not on the map");
     if (c.drafts.length) parts.push(`${c.drafts.length} ${c.drafts.length === 1 ? "draft" : "drafts"}`);
     return parts.join(" · ");
@@ -606,7 +615,7 @@
       fill(tooltip, el("strong", {}, t(S.d.items.title[i])), meta ? el("span", {}, t(meta)) : null, el("span", {}, t(extra)));
     } else if (hit.type === "cand") {
       const c = hit.cand;
-      fill(tooltip, el("strong", {}, `${c.code} · `, t(c.label)), el("span", { text: `${KIND_NAMES[c.kind]} · loneliness percentile ${c.score.lonely.toFixed(1)}` }));
+      fill(tooltip, el("strong", {}, `${c.code} · `, t(c.label)), el("span", { text: `${KIND_NAMES[c.kind]}${oneWay(c) ? " · weaker evidence" : ""} · loneliness percentile ${c.score.lonely.toFixed(1)}` }));
     } else if (hit.type === "draft") {
       const d = hit.draft;
       fill(tooltip, el("strong", {}, `${hit.cand.code} ${d.code} · `, t(d.title)), el("span", { text: `${VERDICT_NAMES[d.verdict]} · nearest real item ${d.nn1.toFixed(3)} · loneliness percentile ${d.lonely.toFixed(1)}` }));
@@ -765,14 +774,39 @@
     )));
   }
 
+  const fix3 = (v) => v.toFixed(3);
+  const pct = (v) => `${v.toFixed(1)}%`;
+  const prob = (v) => (v !== 0 && v < 0.001 ? v.toExponential(1) : String(+v.toPrecision(2)));
+  const anyNumber = (v) => (Number.isInteger(v) ? v.toLocaleString() : v !== 0 && Math.abs(v) < 0.001 ? v.toExponential(2) : String(+v.toPrecision(4)));
   const EVIDENCE = [
-    ["mixNn1", "Mixture's nearest similarity", (v) => v.toFixed(3)],
-    ["baseline", "Typical for matched mixtures", (v) => v.toFixed(3)],
-    ["margin", "Margin over chance", (v) => v.toFixed(3)],
-    ["beats", "Emptier than matched mixtures", (v) => `${v.toFixed(1)}%`],
-    ["pairTail", "Pair's share in the emptiest tail", (v) => `${v.toFixed(1)}%`],
-    ["pairP", "Probability by chance", (v) => (v < 0.001 ? v.toExponential(1) : v.toPrecision(2))],
+    ["mixNn1", "Mixture's nearest similarity", fix3],
+    ["mixNn1All", "Mixture's nearest similarity, nothing left out", fix3],
+    ["baseline", "Typical for matched mixtures", fix3],
+    ["margin", "Margin over chance", fix3],
+    ["beats", "Emptier than matched mixtures", pct],
+    ["pairTail", "Pair's share in the emptiest tail", pct],
+    ["pairP", "Probability by chance", prob],
+    ["pairPParentsOnly", "Probability by chance, only parents left out", prob],
   ];
+
+  // Known score numbers under their labels, in order; any other number under its own name.
+  function measurements(c) {
+    const s = c.score, cut = pairCut();
+    const shown = new Set(["nn1", "lonely"]);
+    const rows = [];
+    for (const [key, label, fmt] of EVIDENCE) {
+      if (typeof s[key] !== "number") continue;
+      rows.push([label, mono(fmt(s[key]))]);
+      shown.add(key);
+    }
+    if (c.kind === "connection" && typeof s.pairP === "number" && cut !== undefined) rows.push(["Bar to pass", mono(prob(cut))]);
+    if (typeof s.parentsA === "number" && typeof s.parentsB === "number") {
+      rows.push(["Different parents used", mono(`${s.parentsA} and ${s.parentsB}`)]);
+      shown.add("parentsA").add("parentsB");
+    }
+    for (const key of Object.keys(s)) if (!shown.has(key) && typeof s[key] === "number") rows.push([key, mono(anyNumber(s[key]))]);
+    return rows;
+  }
 
   function renderCandidate(box, c) {
     const nbs = c.neighborhoods;
@@ -794,9 +828,10 @@
       el("p", { class: "pc-label sub-label", text: "Measurements" }),
       facts([
         ["Kind", KIND_NAMES[c.kind]],
+        testedBothWays(c) ? ["Pair test", oneWay(c) ? "Passed one way only · weaker evidence" : "Passed both ways"] : null,
         ["Loneliness percentile", mono(c.score.lonely.toFixed(1))],
         ["Nearest-neighbor similarity", similarity(c.score.nn1)],
-        ...EVIDENCE.filter(([key]) => typeof c.score[key] === "number").map(([key, label, fmt]) => [label, mono(fmt(c.score[key]))]),
+        ...measurements(c),
         c.x === null ? ["On the map", "Not shown"] : null,
       ]),
       c.tags.length ? el("p", { class: "pc-label sub-label", text: "Leans toward" }) : null,
@@ -962,7 +997,7 @@
       src.query ? el("div", { class: "pc-muted" }, t(src.query)) : null);
   }
   function paramList(params) {
-    return facts(Object.entries(params || {}).map(([k, v]) => [k, mono(v === null ? "none" : String(v))]));
+    return facts(Object.entries(params || {}).map(([k, v]) => [k, typeof v === "string" ? t(v) : mono(v === null ? "none" : String(v))]));
   }
 
   function renderAbout() {
