@@ -221,7 +221,11 @@
             "margin": {"description": "Connections: baseline minus mixNn1; above 0 is emptier than chance.", "type": "number", "minimum": -2, "maximum": 2},
             "beats": {"description": "Connections: share of those matched random mixtures this mixture is emptier than.", "$ref": "#/$defs/pct"},
             "pairTail": {"description": "Connections: share of the random mixtures from this pair of neighborhoods that are among the emptiest 5% of their matched group; chance gives 5.", "$ref": "#/$defs/pct"},
-            "pairP": {"description": "Connections: chance of a pairTail at least this large if the pair were no emptier than others (binomial), before correcting for the number of pairs tested.", "type": "number", "minimum": 0, "maximum": 1}
+            "pairP": {"description": "Connections: chance of a pairTail at least this large if mixtures were assigned to pairs at random within matched groups (exact), before correcting for the number of pairs tested.", "type": "number", "minimum": 0, "maximum": 1},
+            "pairPParentsOnly": {"description": "Connections: pairP when a mixture's score leaves out only its two parents, not their nearest neighbors.", "type": "number", "minimum": 0, "maximum": 1},
+            "parentsA": {"description": "Connections: different parents from the first neighborhood among the pair's tail mixtures.", "type": "integer", "minimum": 0},
+            "parentsB": {"description": "Connections: different parents from the second neighborhood among the pair's tail mixtures.", "type": "integer", "minimum": 0},
+            "mixNn1All": {"description": "Connections: the mixture's similarity to its nearest real item, parents included.", "$ref": "#/$defs/sim"}
           },
           "additionalProperties": {"type": "number"}
         },
