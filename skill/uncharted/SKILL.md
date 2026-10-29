@@ -1,13 +1,15 @@
 ---
 name: uncharted
-description: Map a research field by meaning and find candidate connections nobody has written about yet, with a cost and time estimate the person approves before anything runs. Use when someone wants to map a topic or a field's literature, look for unexplored combinations or gaps in research, estimate what such a map would cost, or draft and verify ideas from an Uncharted map. Runs the Uncharted pipeline on this machine and hands back one map file to open in the viewer.
+description: Map a research field by meaning and find candidate connections, combinations of related topics that are emptier than comparable ones, with a cost and time estimate the person approves before anything runs. Use when someone wants to map a topic or a field's literature, look for unexplored combinations or gaps in research, estimate what such a map would cost, or draft and verify ideas from an Uncharted map. Runs the Uncharted pipeline on this machine and hands back one map file to open in the viewer.
 ---
 
 # Uncharted
 
-Uncharted pulls a field's papers from OpenAlex, embeds every title and abstract as a point in a map of meaning, groups the points into neighborhoods, and looks for pairs of related neighborhoods whose combinations are emptier than chance: candidate connections. The result is one map file the person opens in the Uncharted viewer. Nothing is uploaded anywhere; the file stays on this machine.
+Uncharted pulls a field's papers from OpenAlex, embeds every title and abstract as a point in a map of meaning, groups the points into neighborhoods, and looks for pairs of related neighborhoods whose combinations are emptier than comparable combinations elsewhere in the corpus: candidate connections. The result is one map file the person opens in the Uncharted viewer.
 
-An empty spot is not a good idea by itself. Say so when presenting results: every candidate needs the person's judgment and a search beyond the corpus.
+What leaves the machine: requests to OpenAlex, and, when the person picks OpenAI or Voyage, every title and abstract, sent to that provider to be embedded. With local embedding the texts stay here. The map file itself stays on this machine; the viewer reads it in the browser and uploads nothing.
+
+An empty spot is not a good idea by itself. It can mean untried work, work missing from the corpus, thin abstracts, or a combination that makes no sense. Say so when presenting results: every candidate needs the person's judgment and a search beyond the corpus.
 
 ## Ground rules
 
@@ -66,7 +68,7 @@ Rerunning the same command after any stop resumes where it stopped.
 
 ## 5. What came back
 
-Read `data/gaps/<name>-connections/pairs.json` and the candidate briefs in that folder. Give the person the map file's full path and tell them how to open it: in the Uncharted viewer (the hosted copy linked in the README, or `viewer/index.html` from this repository), choose Open a map file. Summarize the strongest candidate connections in a sentence each, naming the two neighborhoods and the nearest existing work.
+Read `data/gaps/<name>-connections/pairs.json` and the candidate briefs in that folder. Give the person the map file's full path and tell them how to open it: in the Uncharted viewer (the hosted copy linked in the README, or `viewer/index.html` from this repository), choose Open a map file. Summarize the strongest candidate connections in a sentence each, naming the two neighborhoods and the nearest existing work. Lead with the pairs that pass both ways (`robust` in `pairs.json`); say plainly that the others pass only when the parents' nearest neighbors are left out, which may hide work that already joins the two topics.
 
 Then offer to draft the top three in this session.
 
@@ -79,6 +81,8 @@ For each candidate the person picks:
 3. Verify it:
 
        uv run [--extra local] python -I uncharted/verify.py --name <name> --gap data/gaps/<name>-connections/connection-NN-….json data/gaps/<name>-connections/connection-NN-….cand1.md
+
+   A map embedded through OpenAI or Voyage verifies through the same provider, at a few hundred tokens a draft (a hundredth of a cent at OpenAI's large-model price); `verify.py` stops at `--max-dollars`, five cents by default. Tell the person before the first paid check.
 
 4. On RETRY, read the reasons (the item it is too close to, or how far off target it is), revise into `.cand2.md`, and verify again. Stop after three tries and report the best.
 

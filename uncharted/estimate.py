@@ -28,8 +28,10 @@ import datetime
 import json
 import math
 import os
+import re
 import sys
 import time
+import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # `python -I` leaves the script's directory off sys.path
 import openalex  # noqa: E402
@@ -108,13 +110,39 @@ def cmd_topics(args: argparse.Namespace) -> None:
     print(json.dumps({"query": args.query, "topics": out, "cost": {"openalexDollars": SEARCH_CALL}}, indent=1))
 
 
+NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
+
+
+def cited_pages(flt: str, max_items: int, api_key: str | None) -> list[dict]:
+    """The most-cited first page and the page at the cap's edge (as far as basic paging
+    reaches): a capped pull keeps the most-cited works, so it is sampled where it will pull."""
+    pages = sorted({1, min(max(1, math.ceil(max_items / PER_PAGE)), 10_000 // PER_PAGE)})
+    works: list[dict] = []
+    for page in pages:
+        params = {"filter": flt, "per-page": PER_PAGE, "page": page, "sort": "cited_by_count:desc", "select": openalex.SELECT}
+        if api_key:
+            params["api_key"] = api_key
+        data, _ = openalex.fetch(f"{openalex.API}?{urllib.parse.urlencode(params)}")
+        works += data.get("results", [])
+    return works
+
+
 def cmd_scope(args: argparse.Namespace) -> None:
     if sum(bool(x) for x in (args.topic, args.search, args.filter)) != 1:
         raise SystemExit("give exactly one of --topic, --search or --filter")
+    if not NAME.fullmatch(args.name):
+        raise SystemExit("--name must be lowercase letters, digits and hyphens, starting with a letter or digit, at most 64 characters")
+    if args.years and not re.fullmatch(r"\d{4}(-\d{4})?", args.years):
+        raise SystemExit("--years takes a year or a range, such as 2015-2026")
+    if args.max_items is not None and args.max_items < 1:
+        raise SystemExit("--max-items must be at least 1")
+    warnings: list[str] = []
     parts = []
     topic = None
     if args.topic:
         tid = args.topic.rsplit("/", 1)[-1]
+        if not re.fullmatch(r"T\d{1,10}", tid):
+            raise SystemExit("--topic takes an OpenAlex topic id, such as T11687")
         parts.append(f"topics.id:{tid}")
         try:
             data, _ = openalex.fetch(f"https://api.openalex.org/topics/{tid}" + (f"?api_key={args.api_key}" if args.api_key else ""))
@@ -122,7 +150,12 @@ def cmd_scope(args: argparse.Namespace) -> None:
         except Exception:  # noqa: BLE001  (the name is only for display)
             topic = {"id": tid}
     elif args.search:
-        parts.append(f"title_and_abstract.search:{args.search}")
+        words = " ".join(re.sub(r"[,:|!]", " ", args.search).split())
+        if words != args.search.strip():
+            warnings.append("commas, colons, bars and exclamation marks in the search were replaced with spaces, since OpenAlex reads them as filter syntax")
+        if not words:
+            raise SystemExit("--search needs words")
+        parts.append(f"title_and_abstract.search:{words}")
     else:
         parts.append(args.filter)
     if not args.filter:
@@ -131,29 +164,32 @@ def cmd_scope(args: argparse.Namespace) -> None:
         parts.append(f"publication_year:{args.years}")
     flt = ",".join(parts)
     per_call = SEARCH_CALL if ".search" in flt else LIST_CALL
+    order = "cited" if args.max_items else None
 
     t0 = time.time()
     count = openalex.count_works(flt, args.api_key)
-    sample = openalex.sample_works(flt, args.sample, 42, args.api_key)
-    latency = (time.time() - t0) / 2
+    sample = cited_pages(flt, args.max_items, args.api_key) if args.max_items else openalex.sample_works(flt, args.sample, 42, args.api_key)
+    calls = 1 + (len({1, min(max(1, math.ceil(args.max_items / PER_PAGE)), 50)}) if args.max_items else 1)
+    latency = (time.time() - t0) / calls
     records = [r for r in (openalex.normalize(w, "estimate") for w in sample) if r]
     kept, removed = clean(records, set(DROP_TYPES.split(",")), 25, dedupe=True)
     n = len(sample)
-    lo_s, hi_s = wilson(len(kept), n)
-    fetched = min(count, math.ceil(args.max_items / max(lo_s, 0.05))) if args.max_items else count
+    pull_lo, pull_hi = wilson(len(records), n)
+    clean_lo, clean_hi = wilson(len(kept), len(records))
+    cap = args.max_items or math.inf
+    pulled = (min(count * pull_lo, cap), min(count * pull_hi, cap))
+    items = (pulled[0] * clean_lo * (1 - DUPLICATE_SHARE[1]), pulled[1] * clean_hi * (1 - DUPLICATE_SHARE[0]))
+    fetched = min(count, math.ceil(cap / max(pull_lo, 0.05))) if args.max_items else count
     requests = max(1, math.ceil(fetched / PER_PAGE))
-    items_hi = min(count * hi_s, args.max_items or math.inf)
-    items_lo = min(count * lo_s * (1 - DUPLICATE_SHARE[1]), args.max_items or math.inf)
     chars = [len(r["text"]) for r in kept] or [1500]
     mean_chars = sum(chars) / len(chars)
     se = (sum((c - mean_chars) ** 2 for c in chars) / max(len(chars) - 1, 1)) ** 0.5 / max(len(chars), 1) ** 0.5
-    tpi_lo = (mean_chars - 2 * se) / CHARS_PER_TOKEN * 0.85
+    tpi_lo = max(min(chars), mean_chars - 2 * se) / CHARS_PER_TOKEN * 0.85
     tpi_hi = (mean_chars + 2 * se) / CHARS_PER_TOKEN * 1.15
-    tokens = (int(items_lo * tpi_lo), int(math.ceil(items_hi * tpi_hi)))
+    tokens = (int(items[0] * tpi_lo), int(math.ceil(items[1] * tpi_hi)))
 
     model = args.model or DEFAULT_MODELS[args.provider]
     price = PRICES.get((args.provider, model), 0.0 if args.provider == "local" else None)
-    warnings = []
     if price is None:
         warnings.append(f"no price known for {args.provider} {model}; the dollar estimate leaves embedding out")
         price = 0.0
@@ -170,7 +206,7 @@ def cmd_scope(args: argparse.Namespace) -> None:
         size = MODEL_BYTES.get(model)
         times["download"] = (0.0, 0.0) if revision else ((size / 50e6, size / 8e6) if size else (60.0, 600.0))
         (r_lo, r_hi), rate_note = local_rate(model, device, args.benchmarks)
-        times["embed"] = (items_lo / r_hi, items_hi / r_lo)
+        times["embed"] = (items[0] / r_hi, items[1] / r_lo)
     else:
         rate_note = "API time depends on the account's rate limits"
         batches = (max(1, tokens[0] // 250_000), max(1, math.ceil(tokens[1] / 100_000)))
@@ -178,25 +214,26 @@ def cmd_scope(args: argparse.Namespace) -> None:
         times["embed"] = (batches[0] * 2.0, batches[1] * 10.0)
         if not any(os.environ.get(v) for v in ({"openai": ("UNCHARTED_OPENAI_API_KEY", "OPENAI_API_KEY"), "voyage": ("VOYAGE_API_KEY",)}[args.provider])):
             warnings.append(f"no {args.provider} key in the environment; the run will stop at the embedding step without one")
-    times["map"] = (map_seconds(int(items_lo)) * 0.7, map_seconds(int(items_hi)) * 2)
-    times["candidates"] = (candidate_seconds(int(items_lo)) * 0.5, candidate_seconds(int(items_hi)) * 3)
+    times["map"] = (map_seconds(int(items[0])) * 0.7, map_seconds(int(items[1])) * 2)
+    times["candidates"] = (candidate_seconds(int(items[0])) * 0.5, candidate_seconds(int(items[1])) * 3)
     if count > 100_000 and not args.max_items:
         warnings.append(f"{count:,} works match; consider --max-items (most-cited first) or --years to narrow it")
-    if lo_s < 0.5:
-        warnings.append(f"only {len(kept)} of {n} sampled works survive cleaning; many have no usable abstract")
+    if pull_lo < 0.5:
+        warnings.append(f"only {len(records)} of {n} sampled works have a usable abstract")
     if not args.api_key and requests > 1:
         warnings.append("OpenAlex serves only the first page without an API key; set OPENALEX_API_KEY (free at openalex.org)")
     if openalex_dollars > FREE_DAILY:
         warnings.append(f"the pull costs about ${openalex_dollars:.2f}, more than a free key's ${FREE_DAILY:.2f} a day: it pauses when the day's budget runs out and resumes the next day")
-    if count < 50:
-        warnings.append(f"only {count} works match: too few for a map")
+    if items[1] < 100:
+        warnings.append("fewer than 100 works would remain after cleaning: too few for a map")
 
-    total = (embed_dollars[0] + openalex_dollars, embed_dollars[1] + openalex_dollars)
     caps = {
-        "items": int(min(args.max_items or math.inf, math.ceil(count * hi_s * 1.05))),
+        "items": int(min(cap, math.ceil(count * pull_hi * 1.05))),
         "tokens": int(math.ceil(tokens[1] * 1.1)) if args.provider != "local" else None,
-        "dollars": round(math.ceil((total[1] * 1.1 + 0.005) * 100) / 100, 2),
+        "openalexDollars": round(math.ceil((openalex_dollars * 1.2 + 3 * per_call) * 1e4) / 1e4, 4),  # 20% more pages, plus two spare calls and the recount
+        "embeddingDollars": round(math.ceil(embed_dollars[1] * 1.1 * 100) / 100, 2) if args.provider != "local" else 0.0,
     }
+    caps["dollars"] = round(caps["openalexDollars"] + caps["embeddingDollars"], 4)
     estimate = {
         "scope": {
             "source": "OpenAlex works",
@@ -204,22 +241,29 @@ def cmd_scope(args: argparse.Namespace) -> None:
             "search": args.search,
             "filter": flt,
             "years": args.years,
-            "order": "most-cited first" if args.max_items else "as OpenAlex returns them",
-            "maxItems": args.max_items or None,
+            "order": order,
+            "maxItems": args.max_items,
             "count": count,
             "countedAt": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
         },
-        "sample": {"fetched": n, "usable": len(records), "kept": len(kept), "removed": removed, "survival": [round(lo_s, 3), round(hi_s, 3)], "meanChars": round(mean_chars), "types": sorted({(w.get("type") or "") for w in sample})},
-        "items": [int(items_lo), int(items_hi)],
+        "sample": {"fetched": n, "how": "the most-cited first page and the page at the cap" if args.max_items else "a random sample of the matching works",
+                   "usable": len(records), "kept": len(kept), "removed": removed, "meanChars": round(mean_chars)},
+        "pulled": [int(pulled[0]), int(pulled[1])],
+        "items": [int(items[0]), int(items[1])],
         "requests": {"openalex": requests, "perCallDollars": per_call},
         "tokens": list(tokens),
-        "dollars": {"openalex": round(openalex_dollars, 4), "embedding": [round(embed_dollars[0], 4), round(embed_dollars[1], 4)], "total": [round(total[0], 4), round(total[1], 4)]},
+        "dollars": {"openalex": round(openalex_dollars, 4), "embedding": [round(embed_dollars[0], 4), round(embed_dollars[1], 4)], "total": [round(embed_dollars[0] + openalex_dollars, 4), round(embed_dollars[1] + openalex_dollars, 4)]},
         "minutes": {k: [minutes(v[0]), minutes(v[1])] for k, v in times.items()},
         "minutesTotal": [minutes(sum(v[0] for v in times.values())), minutes(sum(v[1] for v in times.values()))],
         "embedding": {"provider": args.provider, "model": model, "dimensions": 1024, "maxSeq": args.max_seq, "device": device, "pricePerMillion": price, "rateNote": rate_note},
         "caps": caps,
+        "assumptions": [
+            f"Items count works left after cleaning; the cap limits works pulled ({caps['items']:,}), and cleaning then drops non-research types and repeated titles.",
+            "Repeated titles across the whole topic: up to 8% (the sample cannot see most of them; the accessibility corpus had 4%).",
+            "About 4 characters a token, within 15%; the API reports the exact count after each request.",
+        ],
         "warnings": warnings,
-        "estimateCost": {"openalexDollars": round(2 * per_call + (LIST_CALL if args.topic else 0), 4)},
+        "estimateCost": {"openalexDollars": round(calls * per_call + (LIST_CALL if args.topic else 0), 4)},
     }
     print(json.dumps(estimate, indent=1))
     if args.scope_out:
@@ -232,11 +276,13 @@ def cmd_scope(args: argparse.Namespace) -> None:
             "source": estimate["scope"],
             "config": {"provider": args.provider, "model": model, "dimensions": 1024, "maxSeq": args.max_seq},
             "caps": caps,
-            "estimate": {k: estimate[k] for k in ("items", "requests", "tokens", "dollars", "minutes", "minutesTotal", "warnings")},
+            "estimate": {k: estimate[k] for k in ("pulled", "items", "requests", "tokens", "dollars", "minutes", "minutesTotal", "assumptions", "warnings")},
         }
         os.makedirs(os.path.dirname(os.path.abspath(args.scope_out)), exist_ok=True)
-        with open(args.scope_out, "w", encoding="utf-8") as fh:
+        tmp = args.scope_out + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(scope, fh, indent=1)
+        os.replace(tmp, args.scope_out)
 
 
 def main() -> None:
@@ -251,7 +297,7 @@ def main() -> None:
     s.add_argument("--search", help="words to find in titles and abstracts (search calls cost ten times list calls)")
     s.add_argument("--filter", help="a raw OpenAlex works filter, used as given")
     s.add_argument("--years", help="publication years, such as 2015-2026")
-    s.add_argument("--max-items", type=int, default=0, help="keep at most this many works, most-cited first")
+    s.add_argument("--max-items", type=int, help="pull at most this many works, most-cited first")
     s.add_argument("--name", default="map", help="name for the run's files")
     s.add_argument("--title", help="title for the map (default: the topic's name)")
     s.add_argument("--provider", choices=sorted(DEFAULT_MODELS), default="local")

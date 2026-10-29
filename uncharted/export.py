@@ -460,6 +460,12 @@ def main() -> None:
                 pairTail=clip(ev["pair_tail"], 0, 100, 1),
                 pairP=sig3(ev["pair_p"]),
             )
+            if ev.get("pair_p_parents_only") is not None:
+                score["pairPParentsOnly"] = sig3(ev["pair_p_parents_only"])
+            if ev.get("parents_a") is not None:
+                score["parentsA"], score["parentsB"] = int(ev["parents_a"]), int(ev["parents_b"])
+            if ev.get("mix_nn1_all") is not None:
+                score["mixNn1All"] = clip(ev["mix_nn1_all"], -1, 1, 3)
             if isinstance(ev.get("method"), dict):
                 methods.append(ev["method"])
         cand = {
@@ -569,8 +575,10 @@ def main() -> None:
         for cand in candidates:
             if text(names.get(cand["id"]), 160):
                 cand["label"] = text(names[cand["id"]], 160)
-    # connections by the strength of their pair's evidence, the others by how lonely their spot is
-    candidates.sort(key=lambda c: (KIND_ORDER[c["kind"]], c["score"].get("pairP", 1.0), -c["score"]["lonely"], c["id"]))
+    # connections by their evidence: those that also pass with only the parents left out
+    # first, then by p; the other kinds by how lonely their spot is
+    cutoff = next((m.get("pairCutoff") for m in methods if m.get("pairCutoff") is not None), 0.0)
+    candidates.sort(key=lambda c: (KIND_ORDER[c["kind"]], c["kind"] == "connection" and c["score"].get("pairPParentsOnly", 0.0) >= cutoff, c["score"].get("pairP", 1.0), -c["score"]["lonely"], c["id"]))
     ranks: collections.Counter = collections.Counter()
     for cand in candidates:
         ranks[cand["kind"]] += 1

@@ -24,9 +24,13 @@ import json
 import math
 import os
 import re
+import sys
 import time
 
 import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # `python -I` leaves the script's directory off sys.path
+from provenance import corpus_fingerprint  # noqa: E402
 
 STOP = set(
     """a an the and or of for to in on at by with from into via as is are be been was were
@@ -45,7 +49,15 @@ def load(base: str) -> tuple[np.ndarray, list[dict]]:
     matrix = np.load(base + ".npy").astype(np.float32)
     with open(base + ".meta.jsonl", encoding="utf-8") as fh:
         meta = [json.loads(line) for line in fh]
-    assert len(meta) == matrix.shape[0], "matrix and meta disagree on row count"
+    if len(meta) != matrix.shape[0]:
+        raise SystemExit(f"{base}.npy has {matrix.shape[0]} rows but {base}.meta.jsonl has {len(meta)}: they come from different embedding runs; embed again")
+    try:
+        with open(base + ".model.json", encoding="utf-8") as fh:
+            info = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        info = {}
+    if info.get("fingerprint") and info["fingerprint"] != corpus_fingerprint(meta, info):
+        raise SystemExit(f"{base}.model.json describes different rows than {base}.meta.jsonl (an embedding run stopped while writing them?); embed again")
     return matrix, meta
 
 

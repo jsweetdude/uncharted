@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import glob
 import json
 import math
 import os
@@ -151,7 +152,9 @@ def repel(
     pool: int = 4000,
 ) -> tuple[np.ndarray, dict]:
     """Push p away from nearby items (soft weights, hottest on the closest) while a tether
-    holds it near p0. Stops at the target loneliness, at the drift limit, or after `steps`."""
+    holds it near p0. Stops at the target loneliness, at the drift limit, or after `steps`.
+    The drift limit is hard: a step that would cross it is not taken. The target counts as
+    reached only when the whole corpus, not just the nearby pool, agrees."""
     X = space.X
     p = p0.copy()
     pool_idx = np.argsort(-(X @ p0))[: min(pool, space.n())]
@@ -164,18 +167,22 @@ def repel(
             Xp = X[pool_idx]
         s = Xp @ p
         nn1 = float(s.max())
-        drift = float(p @ p0)
-        history.append((nn1, drift))
+        history.append((nn1, float(p @ p0)))
         if nn1 <= target_sim:
-            reason = "target reached"
-            break
-        if drift <= max_drift:
-            reason = "drift limit"
-            break
+            if float((X @ p).max()) <= target_sim:
+                reason = "target reached"
+                break
+            pool_idx = np.argsort(-(X @ p))[: min(pool, space.n())]  # something outside the pool is close: look again
+            Xp = X[pool_idx]
+            continue
         w = np.exp((s - 1.0) / tau)
         push = (Xp * (w[:, None] / tau)).sum(axis=0)
         grad = unit(push) - tether * p0
-        p = unit(p - lr * unit(grad))
+        step = unit(p - lr * unit(grad))
+        if float(step @ p0) <= max_drift:
+            reason = "drift limit"
+            break
+        p = step
     nn1 = float((X @ p).max())
     return p, {"steps": len(history), "stop": reason, "start_nn1": history[0][0] if history else None, "end_nn1": nn1, "drift_sim": float(p @ p0)}
 
@@ -437,11 +444,20 @@ def cmd_pairs(args: argparse.Namespace) -> None:
         write_out(d, os.path.join(args.out_dir, f"pair-{n:02d}-c{a}-c{b}"), args.kind)
 
 
-def binomial_sf(k: int, n: int, p: float) -> float:
-    """P(X >= k) for X ~ Binomial(n, p)."""
-    if k <= 0:
-        return 1.0
-    return float(min(1.0, sum(math.comb(n, j) * p**j * (1 - p) ** (n - j) for j in range(k, n + 1))))
+def tail_test(member_groups: np.ndarray, member_tail: np.ndarray, group_size: np.ndarray, group_tail: np.ndarray) -> float:
+    """Chance that a pair's mixtures hold at least this many tail places if mixtures were
+    assigned to pairs at random within each matched group, the tail sets held fixed. Exact:
+    within a group the pair's count is hypergeometric, and the groups are independent, so the
+    pair's count is their convolution. Small groups, ties and a lone pair are handled exactly."""
+    from scipy.stats import hypergeom
+
+    observed = int(member_tail.sum())
+    dist = np.array([1.0])
+    for g in np.unique(member_groups):
+        m = int((member_groups == g).sum())
+        pmf = hypergeom.pmf(np.arange(m + 1), int(group_size[g]), int(group_tail[g]), m)
+        dist = np.convolve(dist, pmf)
+    return float(min(1.0, max(0.0, dist[observed:].sum())))
 
 
 def quantile_bins(values: np.ndarray, k: int) -> np.ndarray:
@@ -449,81 +465,136 @@ def quantile_bins(values: np.ndarray, k: int) -> np.ndarray:
     return np.clip(np.searchsorted(edges, values, side="right") - 1, 0, k - 1)
 
 
+def matched_ranks(scores: np.ndarray, groups: np.ndarray, valid: np.ndarray, tail_pct: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Per mixture: its group's median score, the share of its group that is less empty
+    (`beats`; ties are not less empty), and whether it sits in the group's emptiest tail."""
+    baseline = np.full(len(scores), np.nan, dtype=np.float32)
+    beats = np.zeros(len(scores), dtype=np.float32)
+    for g in np.unique(groups[valid]):
+        idx = np.where((groups == g) & valid)[0]
+        vals = scores[idx]
+        ranked = np.sort(vals)
+        baseline[idx] = np.median(vals)
+        higher = len(vals) - np.searchsorted(ranked, vals, side="right")
+        beats[idx] = 100.0 * higher / max(len(vals) - 1, 1)
+    return baseline, beats, valid & (beats >= 100 - tail_pct)
+
+
 def cmd_connections(args: argparse.Namespace) -> None:
-    """Candidate connections: combinations of two related neighborhoods emptier than chance.
+    """Candidate connections: pairs of related neighborhoods whose mixtures are emptier than
+    comparable mixtures from other pairs. An exploratory, corpus-relative signal: it says where
+    to look, not that an idea is new or good.
 
     1. For every pair of neighborhoods in the related band, draw --mixes random parent pairs
        (one item from each) and mix them with equal weights.
     2. Score each mixture by its nearest real item, leaving out its two parents and their
-       --ring nearest neighbors: a mixture sits close to those by construction.
+       --ring nearest neighbors, which a mixture sits close to by construction. A mixture with
+       too few items left to compare against is not scored. The same is done leaving out the
+       parents only, and reported alongside, since the rings could also hide work that
+       already joins the two neighborhoods.
     3. Mixing always lands somewhere fairly empty, and how empty depends on how similar the
-       parents are and how crowded their region is. So each mixture is ranked only against
-       mixtures in the same matched group (quantile bins of parent similarity crossed with
-       bins of the parents' mean nn1), pooled over every related pair: `beats` is the share of
-       its group that is less empty.
-    4. A pair of neighborhoods passes when more of its mixtures fall in the emptiest --tail
-       percent of their groups than chance allows (binomial tail, Bonferroni-corrected over
-       the pairs tested) and no single parent supplies more than --max-busiest of them.
+       parents are and how crowded their region is. Each mixture is ranked only within its
+       matched group (quantile bins of parent similarity crossed with bins of the parents'
+       mean nn1), pooled over every related pair, and the emptiest --tail percent of each
+       group form its tail.
+    4. A pair passes when its mixtures hold more tail places than random assignment of
+       mixtures to pairs within groups would give (exact test, Bonferroni-corrected over the
+       pairs tested), the tail mixtures draw on enough different parents from each side, and
+       no single parent supplies more than --max-busiest of them.
     5. Each passing pair's emptiest tail mixture is pushed into the nearest empty space, as a
-       blend is, and written with its evidence for export.py.
+       blend is: a proposal for a writer, whose own measurements are separate from the
+       pair's evidence.
     """
+    for name in ("mixes", "max_mixtures", "ring", "sim_bins", "density_bins", "chunk", "top"):
+        if getattr(args, name) < (0 if name == "ring" else 1):
+            raise SystemExit(f"--{name.replace('_', '-')} must be {'zero or more' if name == 'ring' else 'positive'}")
+    if not 0 < args.tail <= 50:
+        raise SystemExit("--tail must be between 0 and 50 percent")
     space = Space(args.dir, args.name)
+    if not np.isfinite(space.X).all():
+        raise SystemExit("the embeddings contain values that are not finite; embed again")
     ring_all = np.load(os.path.join(args.dir, args.name + ".nn.npz"))["idx"]
     ring = ring_all[:, : min(args.ring, ring_all.shape[1])]
     labels = np.array([it["cluster"] for it in space.items])
     if len(space.centroids) < 2:
         raise SystemExit("need at least two neighborhoods; run space.py with a smaller --min-cluster-size")
     lo, hi, pairs = related_band(space.centroids, args.band)
-    if not pairs:
-        raise SystemExit("no pairs of neighborhoods in the related band; widen --band")
     members = {c: np.where(labels == c)[0] for c in range(len(space.centroids))}
-    m = int(min(args.mixes, max(20, args.max_mixtures // len(pairs))))
+    pairs = [(a, b, sim) for a, b, sim in pairs if len(members[a]) and len(members[b])]
+    if len(pairs) < 3:
+        raise SystemExit(f"only {len(pairs)} related pairs of neighborhoods: too few to compare pairs with each other; widen --band or map a larger corpus")
+    m = args.mixes if args.mixes * len(pairs) <= args.max_mixtures else args.max_mixtures // len(pairs)
+    if m < 20:
+        raise SystemExit(f"{len(pairs)} related pairs leave {m} mixtures each under --max-mixtures {args.max_mixtures}; raise it or narrow --band")
     rng = np.random.default_rng(args.seed)
     rows = np.concatenate([np.column_stack([np.full(m, pi), rng.choice(members[a], m), rng.choice(members[b], m)]) for pi, (a, b, _) in enumerate(pairs)])
     X = space.X
+    n = space.n()
     t0 = time.time()
-    mix_nn1 = np.empty(len(rows), dtype=np.float32)
+    with_ring = np.full(len(rows), np.nan, dtype=np.float32)
+    parents_only = np.full(len(rows), np.nan, dtype=np.float32)
+    mix_all = np.full(len(rows), np.nan, dtype=np.float32)
     for start in range(0, len(rows), args.chunk):
         part = rows[start : start + args.chunk]
         P = X[part[:, 1]] + X[part[:, 2]]
-        P /= np.linalg.norm(P, axis=1, keepdims=True)
+        norms = np.linalg.norm(P, axis=1, keepdims=True)
+        ok = norms[:, 0] > 1e-6  # opposite parents cancel out: nothing to score
+        P = P / np.maximum(norms, 1e-6)
         S = P @ X.T
-        np.put_along_axis(S, np.concatenate([part[:, 1:3], ring[part[:, 1]], ring[part[:, 2]]], axis=1), -2.0, axis=1)
-        mix_nn1[start : start + args.chunk] = S.max(axis=1)
+        mix_all[start : start + args.chunk] = np.where(ok, S.max(axis=1), np.nan)
+        np.put_along_axis(S, part[:, 1:3], -np.inf, axis=1)
+        parents_only[start : start + args.chunk] = np.where(ok, S.max(axis=1), np.nan)
+        excluded = np.concatenate([part[:, 1:3], ring[part[:, 1]], ring[part[:, 2]]], axis=1)
+        np.put_along_axis(S, excluded, -np.inf, axis=1)
+        left = n - np.array([len(set(e.tolist())) for e in excluded])
+        with_ring[start : start + args.chunk] = np.where(ok & (left >= 10), S.max(axis=1), np.nan)
     parent_sim = np.einsum("ij,ij->i", X[rows[:, 1]], X[rows[:, 2]])
     density = (space.nn1[rows[:, 1]] + space.nn1[rows[:, 2]]) / 2
     groups = quantile_bins(parent_sim, args.sim_bins) * args.density_bins + quantile_bins(density, args.density_bins)
-    baseline = np.zeros(len(rows), dtype=np.float32)
-    beats = np.zeros(len(rows), dtype=np.float32)
-    for g in np.unique(groups):
-        idx = np.where(groups == g)[0]
-        vals = mix_nn1[idx]
-        ranked = np.sort(vals)
-        baseline[idx] = np.median(vals)
-        higher = len(vals) - np.searchsorted(ranked, vals, side="right")  # less empty; ties are not
-        beats[idx] = 100.0 * higher / max(len(vals) - 1, 1)
-    tail = beats >= 100 - args.tail
+    n_groups = args.sim_bins * args.density_bins
+    results = {}
+    for variant, scores in (("ring", with_ring), ("parents", parents_only)):
+        valid = np.isfinite(scores)
+        baseline, beats, tail = matched_ranks(scores, groups, valid, args.tail)
+        size = np.bincount(groups[valid], minlength=n_groups)
+        tail_size = np.bincount(groups[tail], minlength=n_groups)
+        results[variant] = (valid, baseline, beats, tail, size, tail_size)
+    valid, baseline, beats, tail, size, tail_size = results["ring"]
     log(f"{len(pairs)} related pairs (centroid similarity {lo:.3f}-{hi:.3f}) x {m} mixtures = {len(rows)}, scored in {time.time() - t0:.0f}s; "
-        f"mixture nn1 without parents and rings: median {np.median(mix_nn1):.3f}; {100 * tail.mean():.1f}% in the {args.tail:g}% tail")
+        f"{int((~valid).sum())} unscorable; mixture nn1 without parents and rings: median {np.nanmedian(with_ring):.3f}; {100 * tail.sum() / max(valid.sum(), 1):.1f}% in the tail")
 
     cutoff = args.alpha / len(pairs)
     table = []
     for pi, (a, b, csim) in enumerate(pairs):
-        mine = np.where(rows[:, 0] == pi)[0]
+        mine = np.where((rows[:, 0] == pi) & valid)[0]
         hits = mine[tail[mine]]
-        busiest = 0.0
+        p = tail_test(groups[mine], tail[mine], size, tail_size) if len(mine) else 1.0
+        pv, _, _, tail_p, size_p, tail_size_p = results["parents"]
+        mine_p = np.where((rows[:, 0] == pi) & pv)[0]
+        p_parents = tail_test(groups[mine_p], tail_p[mine_p], size_p, tail_size_p) if len(mine_p) else 1.0
+        busiest, parents_a, parents_b = 0.0, 0, 0
         if len(hits):
-            busiest = max(np.unique(rows[hits, 1], return_counts=True)[1].max(), np.unique(rows[hits, 2], return_counts=True)[1].max()) / len(hits)
-        p = binomial_sf(len(hits), m, args.tail / 100)
-        best = int(hits[np.argmax(baseline[hits] - mix_nn1[hits])]) if len(hits) else None
-        table.append({"a": a, "b": b, "centroid_sim": csim, "tail": int(len(hits)), "mixes": m, "p": p, "busiest": float(busiest), "best": best,
-                      "passes": bool(len(hits) and p < cutoff and busiest <= args.max_busiest)})
-    table.sort(key=lambda t: (not t["passes"], t["p"], -t["tail"]))
+            ua, ca = np.unique(rows[hits, 1], return_counts=True)
+            ub, cb = np.unique(rows[hits, 2], return_counts=True)
+            busiest = max(ca.max(), cb.max()) / len(hits)
+            parents_a, parents_b = len(ua), len(ub)
+        need = (min(args.min_parents, len(members[a])), min(args.min_parents, len(members[b])))
+        best = int(hits[np.argmax(baseline[hits] - with_ring[hits])]) if len(hits) else None
+        table.append({
+            "a": a, "b": b, "centroid_sim": csim, "tail": int(len(hits)), "mixes": int(len(mine)), "p": p, "p_parents_only": p_parents,
+            "busiest": float(busiest), "parents_a": parents_a, "parents_b": parents_b, "best": best,
+            "passes": bool(len(hits) and p < cutoff and busiest <= args.max_busiest and parents_a >= need[0] and parents_b >= need[1]),
+            "robust": bool(p_parents < cutoff),
+        })
+    # passing pairs that also pass with only the parents left out come first: their emptiness
+    # does not depend on the rings, which could be hiding work that already joins the two
+    table.sort(key=lambda t: (not t["passes"], not t["robust"], t["p"], -t["tail"]))
     passing = [t for t in table if t["passes"]]
-    print(f"\n{len(passing)} of {len(pairs)} pairs pass (binomial p < {cutoff:.2g} after Bonferroni, no parent in more than {100 * args.max_busiest:.0f}% of the tail mixtures):")
-    for t in table[: max(len(passing), 0) + 5]:
-        mark = "PASS" if t["passes"] else "    "
-        print(f"  {mark} {space.cluster_label(t['a'])} + {space.cluster_label(t['b'])}: tail {t['tail']}/{m} ({100 * t['tail'] / m:.0f}%), p {t['p']:.1e}, busiest parent {100 * t['busiest']:.0f}%")
+    print(f"\n{len(passing)} of {len(pairs)} pairs pass (exact p < {cutoff:.2g} after Bonferroni; at least {args.min_parents} different parents a side and none in more than {100 * args.max_busiest:.0f}% of the tail mixtures); "
+          f"{sum(t['robust'] for t in passing)} also pass with only the parents left out (PASS), the rest only with the rings left out (pass):")
+    for t in table[: len(passing) + 5]:
+        mark = ("PASS" if t["robust"] else "pass") if t["passes"] else "    "
+        print(f"  {mark} {space.cluster_label(t['a'])} + {space.cluster_label(t['b'])}: tail {t['tail']}/{t['mixes']} ({100 * t['tail'] / max(t['mixes'], 1):.0f}%), p {t['p']:.1e} (parents only {t['p_parents_only']:.1e}), parents {t['parents_a']}/{t['parents_b']}, busiest {100 * t['busiest']:.0f}%")
 
     method = {
         "method": "connections-v1",
@@ -534,15 +605,29 @@ def cmd_connections(args: argparse.Namespace) -> None:
         "simBins": args.sim_bins,
         "densityBins": args.density_bins,
         "tailPct": args.tail,
+        "test": "exact: random assignment of mixtures to pairs within matched groups",
         "alpha": args.alpha,
         "pairCutoff": float(f"{cutoff:.3g}"),
+        "minParents": args.min_parents,
         "maxBusiest": args.max_busiest,
         "minTargetLonely": args.min_target_lonely,
         "seed": args.seed,
     }
     os.makedirs(args.out_dir, exist_ok=True)
-    with open(os.path.join(args.out_dir, "pairs.json"), "w", encoding="utf-8") as fh:
+    if args.briefs:
+        old = sorted(glob.glob(os.path.join(args.out_dir, "connection-*")))
+        if old:
+            if not args.replace:
+                raise SystemExit(f"{args.out_dir} already holds candidates from an earlier run; pass --replace to move them aside first")
+            archive = f"{args.out_dir.rstrip(os.sep)}-previous-{time.strftime('%Y%m%d-%H%M%S')}"
+            os.makedirs(archive)
+            for f in old + glob.glob(os.path.join(args.out_dir, "pairs.json")):
+                os.replace(f, os.path.join(archive, os.path.basename(f)))
+            log(f"moved {len(old)} earlier candidate files to {archive}")
+    tmp = os.path.join(args.out_dir, "pairs.json.tmp")
+    with open(tmp, "w", encoding="utf-8") as fh:
         json.dump({"corpus": space.name, "method": method, "pairs": [{k2: v for k2, v in t.items() if k2 != "best"} for t in table]}, fh, indent=1)
+    os.replace(tmp, os.path.join(args.out_dir, "pairs.json"))
     if not args.briefs:
         return
     target_sim = space.sim_for_pct(args.target_pct)
@@ -556,7 +641,6 @@ def cmd_connections(args: argparse.Namespace) -> None:
         p0 = unit(X[a_item] + X[b_item])
         if any(float(p0 @ q) > 0.95 for q in chosen):
             continue
-        chosen.append(p0)
         p, info = repel(space, p0, target_sim, max_drift=args.max_drift, tau=args.tau, tether=args.tether, lr=args.lr, steps=args.steps)
         d = describe(space, p0, p, [a_item, b_item], info, args.target_pct, f"connection between neighborhoods #{t['a']} and #{t['b']}")
         if d["gap_lonely_pct"] < args.min_target_lonely:
@@ -567,18 +651,23 @@ def cmd_connections(args: argparse.Namespace) -> None:
             "b": t["b"],
             "centroid_sim": t["centroid_sim"],
             "parent_sim": float(parent_sim[i]),
-            "mix_nn1": float(mix_nn1[i]),
+            "mix_nn1": float(with_ring[i]),
+            "mix_nn1_all": float(mix_all[i]),
             "baseline": float(baseline[i]),
-            "margin": float(baseline[i] - mix_nn1[i]),
+            "margin": float(baseline[i] - with_ring[i]),
             "beats": float(beats[i]),
-            "pair_tail": 100.0 * t["tail"] / m,
+            "pair_tail": 100.0 * t["tail"] / max(t["mixes"], 1),
             "pair_tail_count": t["tail"],
             "pair_p": t["p"],
+            "pair_p_parents_only": t["p_parents_only"],
+            "parents_a": t["parents_a"],
+            "parents_b": t["parents_b"],
             "busiest": t["busiest"],
             "method": method,
         }
         written += 1
         write_out(d, os.path.join(args.out_dir, f"connection-{written:02d}-c{t['a']}-c{t['b']}"), args.kind)
+        chosen.append(p0)
 
 
 def main() -> None:
@@ -622,8 +711,10 @@ def main() -> None:
     cn.add_argument("--sim-bins", type=int, default=10, help="quantile bins of parent similarity for matching")
     cn.add_argument("--density-bins", type=int, default=5, help="quantile bins of the parents' mean nn1 for matching")
     cn.add_argument("--tail", type=float, default=5.0, help="percent of each matched group counted as its emptiest tail")
-    cn.add_argument("--alpha", type=float, default=0.05, help="family-wise error rate, split over the pairs tested")
+    cn.add_argument("--alpha", type=float, default=0.05, help="family-wise error rate for the pair test, split over the pairs tested")
     cn.add_argument("--max-busiest", type=float, default=0.4, help="a pair fails when one parent supplies more than this share of its tail mixtures")
+    cn.add_argument("--min-parents", type=int, default=5, help="a pair fails unless its tail mixtures draw on this many different parents from each side (or all of a smaller neighborhood)")
+    cn.add_argument("--replace", action="store_true", help="move earlier candidates in --out-dir aside before writing new ones")
     cn.add_argument("--top", type=int, default=12, help="most candidates to write")
     cn.add_argument("--min-target-lonely", type=float, default=50.0, help="drop a candidate whose pushed spot is lonelier than less than this percent of the corpus")
     cn.add_argument("--seed", type=int, default=42)

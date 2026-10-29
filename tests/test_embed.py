@@ -42,13 +42,19 @@ class FakeAPI:
         body = json.loads(req.data)
         self.requests.append({"url": req.full_url, "body": body, "auth": req.headers.get("Authorization")})
         step = self.script.pop(0) if self.script else "ok"
-        if step != "ok":
+        if step == "timeout":
+            raise TimeoutError("timed out")
+        if step == "crash":
+            raise RuntimeError("process killed")
+        if step not in ("ok", "no-usage"):
             headers = email.message.Message()
             headers["Retry-After"] = "0"
             message = json.dumps({"error": {"code": "insufficient_quota" if step == "quota" else "x", "message": "failure"}}).encode()
             raise urllib.error.HTTPError(req.full_url, 429 if step == "quota" else int(step), "fail", headers, io.BytesIO(message))
         texts = body["input"]
-        data = {"data": [{"index": i, "embedding": vector(t)} for i, t in reversed(list(enumerate(texts)))], "usage": {"total_tokens": sum(len(t) // 4 for t in texts)}}
+        data = {"data": [{"index": i, "embedding": vector(t)} for i, t in reversed(list(enumerate(texts)))]}
+        if step != "no-usage":
+            data["usage"] = {"total_tokens": sum(len(t) // 4 for t in texts)}
         return io.BytesIO(json.dumps(data).encode())
 
 
@@ -64,8 +70,13 @@ class EmbedAPI(unittest.TestCase):
         self.env.start()
         self.nosleep = mock.patch.object(embed.time, "sleep", lambda s: None)
         self.nosleep.start()
+        self.small = [mock.patch.object(cls, "max_inputs", 2) for cls in (embed.OpenAIProvider, embed.VoyageProvider)]
+        for patch in self.small:  # two inputs a request, so six records take three requests
+            patch.start()
 
     def tearDown(self):
+        for patch in self.small:
+            patch.stop()
         self.nosleep.stop()
         self.env.stop()
         self.tmp.cleanup()
@@ -127,6 +138,33 @@ class EmbedAPI(unittest.TestCase):
         self.assertEqual(self.run_embed(fake, "--provider", "openai", "--max-tokens", "3", name="cap"), 3)
         self.assertEqual(fake.requests, [])
         self.assertEqual(self.run_embed(FakeAPI(), "--provider", "openai", "--resume", "--max-tokens", "100000", name="cap"), 0)
+
+    def test_zero_cap_is_a_cap(self):
+        fake = FakeAPI()
+        self.assertEqual(self.run_embed(fake, "--provider", "openai", "--max-tokens", "0", name="zero"), 3)
+        self.assertEqual(fake.requests, [])
+
+    def test_unknown_outcome_counts_against_the_cap(self):
+        fake = FakeAPI(["timeout"])
+        self.assertEqual(self.run_embed(fake, "--provider", "openai", name="timeout"), 0)
+        _, info = self.outputs("timeout")
+        self.assertGreater(info["uncertain_tokens"], 0)
+        self.assertGreater(info["dollars_possible"], info["dollars"])
+        tight = FakeAPI(["timeout"])  # room for the first try but not for a retry
+        self.assertEqual(self.run_embed(tight, "--provider", "openai", "--max-tokens", "40", name="tight"), 3)
+        self.assertEqual(len(tight.requests), 1)
+
+    def test_crash_after_sending_is_counted_on_resume(self):
+        with self.assertRaises(RuntimeError):
+            self.run_embed(FakeAPI(["ok", "crash"]), "--provider", "openai", name="crash")
+        self.assertEqual(self.run_embed(FakeAPI(), "--provider", "openai", "--resume", name="crash"), 0)
+        _, info = self.outputs("crash")
+        self.assertGreater(info["uncertain_tokens"], 0)
+
+    def test_reply_without_usage_is_counted_as_possible(self):
+        self.assertEqual(self.run_embed(FakeAPI(["no-usage"]), "--provider", "openai", name="nousage"), 0)
+        _, info = self.outputs("nousage")
+        self.assertGreater(info["uncertain_tokens"], 0)
 
     def test_voyage_request_shape(self):
         fake = FakeAPI()

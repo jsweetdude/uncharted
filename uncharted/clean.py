@@ -77,8 +77,10 @@ def main() -> None:
             rules.append(f"Kept the first of each repeated title, ignoring case and punctuation ({removed['duplicate title']} repeats dropped).")
         info["cleaning"] = [line for line in info.get("cleaning", []) if not line.startswith(("Dropped ", "Kept the first"))] + rules
         info["sources"][0]["items"] = len(kept) if len(info.get("sources", [])) == 1 else info["sources"][0].get("items")
-        with open(args.corpus_info, "w", encoding="utf-8") as fh:
+        tmp = args.corpus_info + ".tmp"  # replace, never truncate: the manifest's sources live here
+        with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(info, fh, indent=1)
+        os.replace(tmp, args.corpus_info)
 
 
 if __name__ == "__main__":
