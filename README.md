@@ -4,7 +4,7 @@ Find the empty places in a field and write what would live there.
 
 The method: embed every item in a corpus as a point on a map of meaning, find the regions where nothing exists yet (holes between neighborhoods, or the emptiest spot near a blend of related items), have a writer draft the item that would sit there, then embed the draft exactly like a real item and measure where it landed. If it is too close to something that exists, the measurements say what, and the writer tries again. Every surviving candidate carries a number: how similar it is to the closest real thing, and what share of the corpus is more crowded than it.
 
-The pipeline is domain-agnostic. A domain is a loader that emits the shared record shape and a one-paragraph instruction saying what kind of artifact to write (paper abstract, talk abstract, invention disclosure, component spec). Everything runs locally; no text leaves the machine.
+The pipeline is domain-agnostic. A domain is a loader that emits the shared record shape and a one-paragraph instruction saying what kind of artifact to write (paper abstract, talk abstract, invention disclosure, component spec). Everything runs on this machine. The network carries only OpenAlex requests and, if you choose an API embedder (OpenAI or Voyage), the texts sent to it; with local embedding no text leaves the machine.
 
 ## Setup
 
@@ -88,7 +88,7 @@ For scale, on 2026-10-28 on an M3 Pro: the 20,000 most-cited works in OpenAlex's
 `viewer/` is a static site with no build step and no server-side code. It opens Uncharted map files (version 1, defined in `schema/README.md`) in the browser.
 
 - **Opening a map.** "Open a map file", or drop a file onto the page: plain `.json` or `.json.gz`. The file is read in the browser and never uploaded. A Web Worker checks it against the schema and the rules beyond it (the checks `uncharted/schema.py` runs, ported to `viewer/mapfile.js`) under the 200 MB cap, counted while decompressing. A file that fails shows its first problem and the open map stays; a second map that passes replaces the first.
-- **Samples.** `viewer/samples/` holds the built-in samples, opened with "Load the sample" or `?sample=<id>` and checked the same way. Today that is `small.json`, the invented twelve-talk map from `schema/examples` (CC0), which a test keeps identical to its source.
+- **Samples.** `viewer/samples/` holds the built-in samples, opened with "Load the sample" or `?sample=<id>` and checked the same way. Today that is `small.json`, the invented twelve-talk map from `schema/examples` (CC0), which a test keeps identical to its source, and `random.json.gz`, 1,720 made-up points with invented names that `uncharted/demo.py` runs through the real map and connection steps, so the viewer can show a full-size map without shipping anyone's data.
 - **What it shows.** Items are colored by neighborhood or by loneliness percentile. Candidate connections are hollow shapes (a circle with a dot for a connection, a diamond for a pair, a triangle for a blend) at their placement, gathered into a numbered circle where they overlap; a candidate whose `x` and `y` are null appears only in the list. Pinning a candidate dims the rest, lights its neighborhoods, rings its nearest items in numbered cobalt (the must-not-copy list in Details), outlines the items it was built from, shows its drafts (a filled square passed, a hollow one needs another try) and fits the view. Opening one of its items keeps it in focus, with previous, next and a way back; Esc steps back one level. The address carries the pinned candidate's code (`#C1`). A connection's Details show the evidence it was chosen on, including how its pair test passed: a pair that passes only with its parents' nearest neighbors left out (`pairPParentsOnly` at or above `manifest.candidates.pairCutoff`) reads "weaker evidence" in the list and Details. A score number the viewer has no label for shows under its own name. "About this map" shows the manifest: sources and retrieval dates, the embedding model, provider and dimensions, since maps from different models cannot be compared.
 - **Without the canvas.** The candidate, draft, neighborhood and title-search lists reach everything on the map. Every section has a "?" with a short explanation. Search pages through every match, 25 at a time. With the map focused, arrow keys pan, `+` and `-` zoom, `0` fits the map, and N and P step through candidates.
 - **Untrusted text.** Every string goes in as text, never markup. A link is joined from the prefix table, parsed with `URL`, and opened only when it is http or https with a host and no credentials. A content security policy (in `index.html` and `vercel.json`) allows no inline script or style.
@@ -135,3 +135,7 @@ Distance measures how unlike a thing is, not whether it is any good. Blends of u
     viewer/         map viewer: index.html, map.js, porcelain.css
     viewer/data/    exported map data (git-ignored)
     logs/           run logs
+
+## License
+
+MIT; see `LICENSE`. Data you pull keeps its source's license, which each map file's manifest records.

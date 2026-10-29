@@ -18,7 +18,10 @@
   const KIND_NAMES = { connection: "Connection", pair: "Pair", blend: "Blend" };
   const KIND_HINTS = { connection: "mix of two related neighborhoods, emptier than comparable pairs", pair: "between two related neighborhoods", blend: "mix of chosen items" };
   const VERDICT_NAMES = { pass: "Passed", retry: "Retry" };
-  const SAMPLES = [{ id: "small", file: "samples/small.json", name: "the sample: 12 invented talks" }];
+  const SAMPLES = [
+    { id: "small", file: "samples/small.json", name: "the sample: 12 invented talks" },
+    { id: "random", file: "samples/random.json.gz", name: "a random map: 1,720 made-up points" },
+  ];
   const EMPTY_DETAILS = "Pick a candidate connection to see what surrounds it, or select any point.";
   const CLUMP_PX = 14;
 
@@ -1089,7 +1092,7 @@
   // slow sample download can never replace a file chosen after it.
   let ticket = 0;
   function busy(on, name) {
-    for (const b of document.querySelectorAll("#open-file, #open-sample, #start-open, #start-sample")) b.disabled = on;
+    for (const b of document.querySelectorAll("#open-file, #open-sample, #start-open, #start-sample, #start-random")) b.disabled = on;
     const status = $("map-status");
     status.textContent = on ? `Reading ${name}…` : "";
     status.hidden = !on || S.d === null;
@@ -1216,6 +1219,7 @@
     fileInput.value = "";
   });
   for (const id of ["open-sample", "start-sample"]) $(id).addEventListener("click", () => openSample(SAMPLES[0]));
+  $("start-random").addEventListener("click", () => openSample(SAMPLES[1]));
 
   let dragDepth = 0;
   const hasFiles = (e) => e.dataTransfer && [...e.dataTransfer.types].includes("Files");
