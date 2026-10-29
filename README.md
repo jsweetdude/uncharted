@@ -8,12 +8,13 @@ The pipeline is domain-agnostic. A domain is a loader that emits the shared reco
 
 ## Setup
 
-Python 3.12 (arm64 on Apple silicon). Create a venv and install:
+Python 3.11 or later. Dependencies are declared in `pyproject.toml` and locked in `uv.lock`. With [uv](https://docs.astral.sh/uv/):
 
-    uv venv --python 3.12 .venv
-    uv pip install --python .venv/bin/python -r requirements.txt
+    uv sync --extra local
 
-The first embedding run downloads `BAAI/bge-large-en-v1.5` (about 1.3 GB) into the Hugging Face cache. On an M3 Pro the model embeds about 25 abstracts a second in float16.
+The `local` extra adds PyTorch and sentence-transformers, for embedding on this machine. Run scripts as `uv run python -I uncharted/<script>.py ...`, or activate `.venv` and use `python -I` as the examples below do. Without uv, `python -m venv .venv && .venv/bin/pip install -r requirements.txt` installs the same packages, unpinned.
+
+The first embedding run downloads the model into the Hugging Face cache: `BAAI/bge-large-en-v1.5` by default (about 1.3 GB), which embeds about 25 abstracts a second in float16 on an M3 Pro.
 
 Run scripts with `python -I` so downloaded corpus files can never shadow a module.
 
@@ -37,8 +38,8 @@ Run scripts with `python -I` so downloaded corpus files can never shadow a modul
 
    Compare two embedded corpora of one field side by side (size, DOI overlap in both directions, nearest-neighbor percentiles, neighborhoods, a noise proxy): `python -I uncharted/compare.py --a papers-clean --b papers-oa --out data/compare-papers.md`.
 
-3. **Map**: `python -I uncharted/space.py --name papers [--min-cluster-size N]`
-   Top-10 neighbors per item, loneliness percentiles, HDBSCAN neighborhoods on a 10-d UMAP, a 2-d UMAP for the flat map, per-neighborhood labels (distinctive title terms and tags), and a console report: biggest and most popular neighborhoods, tightest and loosest, loneliest items, most cloned items.
+3. **Map**: `python -I uncharted/space.py --name papers [--min-cluster-size N] [--min-samples 5]`
+   Top-10 neighbors per item, loneliness percentiles, HDBSCAN neighborhoods on a 10-d UMAP, a 2-d UMAP for the flat map, per-neighborhood labels (distinctive title terms and tags), and a console report: biggest and most popular neighborhoods, tightest and loosest, loneliest items, most cloned items. `--min-samples` stays small (default 5) because HDBSCAN's own default, equal to the cluster size, can fold a whole map into one neighborhood. `<name>.space.json` records the settings for the map file's manifest.
 
 4. **Find gaps**: `python -I uncharted/gaps.py blend|holes ...`
    - `blend --titles "..." "..."` or `--ids` or `--clusters 12 40`: average the ingredients, then push the point away from every item (soft weights, hottest on the closest) while a tether holds it near the blend, until it is lonelier than `--target-pct` of the corpus or has drifted past `--max-drift`.
@@ -56,6 +57,9 @@ Run scripts with `python -I` so downloaded corpus files can never shadow a modul
 
 8. **See the map**: `python -I uncharted/export_map.py --name papers [--gaps data/gaps/holes data/gaps/pairs]`
    Writes `viewer/data/<name>.js` and refreshes `viewer/data/index.js`, the list of exported corpora. Without `--gaps`, every gap JSON under `data/gaps` whose corpus matches `--name` is included. Then open `viewer/index.html` (see Map viewer).
+
+9. **Export a map file**: `python -I uncharted/export.py --name talks-q --title "Accessibility conference talks" --corpus-info data/corpora/talks.corpus.json --candidates data/gaps/talks-q-pairs --out data/exports/talks.json`
+   Writes one JSON map file (format `uncharted-export`, version 1; an `--out` ending in `.gz` is compressed): the items, neighborhoods and candidates, each candidate's brief and drafts inline, and a manifest of how the map was made, with the sources and cleaning rules taken from `--corpus-info`. A draft goes into the file only while its text and the corpus are what verify.py measured; `--snippet-words N` adds each item's first N words. The file is validated before it is written, and `python -I uncharted/schema.py <file>` checks any map file. The format, its rules and example files are in `schema/README.md`. This is the file the version 1 viewer imports; until then, step 8 feeds the current viewer.
 
 ## Map viewer
 
@@ -93,11 +97,14 @@ Distance measures how unlike a thing is, not whether it is any good. Blends of u
 
 ## Layout
 
-    uncharted/      loaders, embed, space, gaps, verify (standalone scripts)
+    uncharted/      loaders, embed, space, gaps, verify, export, schema (standalone scripts)
+    schema/         map file format: JSON Schema, rules, example files
+    tests/          python -I -m unittest discover -s tests
     data/corpora/   loader output (git-ignored)
     data/embeddings/ matrices, metadata, maps (git-ignored)
     data/gaps/      briefs, candidates, verification logs (git-ignored)
     data/raw/       cached fetched pages (git-ignored)
+    data/exports/   map files (git-ignored)
     viewer/         map viewer: index.html, map.js, porcelain.css
     viewer/data/    exported map data (git-ignored)
     logs/           run logs

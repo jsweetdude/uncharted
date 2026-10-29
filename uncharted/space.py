@@ -67,11 +67,12 @@ def topk_neighbors(matrix: np.ndarray, k: int = 10, chunk: int = 2048) -> tuple[
 
 
 def loneliness_percentile(nn1: np.ndarray) -> np.ndarray:
-    """Share of items whose nearest neighbor is MORE similar than this item's (0-100)."""
-    order = np.argsort(-nn1)  # most crowded first
-    pct = np.empty(len(nn1), dtype=np.float32)
-    pct[order] = 100.0 * np.arange(len(nn1)) / max(len(nn1) - 1, 1)
-    return pct
+    """Share of the other items whose nearest neighbor is more similar than this item's, 0 to
+    100. Ties count as not more similar, so the loneliest item scores 100 only when no other
+    item is as lonely."""
+    ranked = np.sort(nn1)
+    more_crowded = len(nn1) - np.searchsorted(ranked, nn1, side="right")
+    return (100.0 * more_crowded / max(len(nn1) - 1, 1)).astype(np.float32)
 
 
 def title_terms(title: str) -> list[str]:
@@ -97,6 +98,7 @@ def main() -> None:
     ap.add_argument("--dir", default="data/embeddings")
     ap.add_argument("--k", type=int, default=10)
     ap.add_argument("--min-cluster-size", type=int, default=0, help="HDBSCAN min cluster size (default: sqrt(n)/2, at least 5)")
+    ap.add_argument("--min-samples", type=int, default=5, help="HDBSCAN min samples; left equal to the cluster size, as HDBSCAN's own default does, a map can collapse into one blob")
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
 
@@ -111,6 +113,7 @@ def main() -> None:
     np.savez_compressed(base + ".nn.npz", idx=idx, sims=sims)
     log(f"nearest-neighbor similarity: p10 {np.percentile(nn1,10):.3f} median {np.median(nn1):.3f} p90 {np.percentile(nn1,90):.3f} max {nn1.max():.3f}")
 
+    import sklearn  # noqa: E402
     import umap  # noqa: E402  (slow import, keep it after the cheap work)
     from sklearn.cluster import HDBSCAN  # noqa: E402
 
@@ -119,10 +122,10 @@ def main() -> None:
     low = reducer10.fit_transform(matrix)
     log(f"umap 10-d in {time.time()-t0:.0f}s")
     mcs = args.min_cluster_size or max(5, int(math.sqrt(n) / 2))
-    labels = HDBSCAN(min_cluster_size=mcs).fit_predict(low)
+    labels = HDBSCAN(min_cluster_size=mcs, min_samples=args.min_samples).fit_predict(low)
     n_clusters = int(labels.max()) + 1
     noise = int((labels == -1).sum())
-    log(f"hdbscan min_cluster_size={mcs}: {n_clusters} clusters, {noise} unclustered")
+    log(f"hdbscan min_cluster_size={mcs} min_samples={args.min_samples}: {n_clusters} clusters, {noise} unclustered")
 
     t0 = time.time()
     reducer2 = umap.UMAP(n_components=2, n_neighbors=15, min_dist=0.1, metric="cosine", random_state=args.seed)
@@ -188,6 +191,15 @@ def main() -> None:
         "clusters": n_clusters,
         "unclustered": noise,
         "min_cluster_size": mcs,
+        "params": {
+            "neighbors": args.k,
+            "seed": args.seed,
+            "minClusterSize": mcs,
+            "minSamples": args.min_samples,
+            "clustering": "HDBSCAN on a 10-d UMAP (30 neighbors, min distance 0, cosine)",
+            "layout": "2-d UMAP (15 neighbors, min distance 0.1, cosine)",
+            "libraries": f"umap-learn {umap.__version__}, scikit-learn {sklearn.__version__}, numpy {np.__version__}",
+        },
         "nn1_percentiles": {str(p): float(np.percentile(nn1, p)) for p in (1, 5, 10, 25, 50, 75, 90, 95, 99)},
     }
     with open(base + ".space.json", "w", encoding="utf-8") as fh:

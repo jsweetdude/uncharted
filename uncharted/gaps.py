@@ -408,7 +408,7 @@ def cmd_pairs(args: argparse.Namespace) -> None:
         p0 = M[i]
         p, info = repel(space, p0, target_sim, max_drift=args.max_drift, tau=args.tau, tether=args.tether, lr=args.lr, steps=args.steps)
         d = describe(space, p0, p, [central[a], central[b]], info, args.target_pct, f"blend of neighborhoods #{a} + #{b}")
-        d["pair"] = {"a": a, "b": b, "centroid_sim": s, "midpoint_nn1": float(mid_nn1[i])}
+        d["pair"] = {"a": a, "b": b, "centroid_sim": s, "midpoint_nn1": float(mid_nn1[i]), "min_related": args.min_related, "max_related": args.max_related}
         write_out(d, os.path.join(args.out_dir, f"pair-{n:02d}-c{a}-c{b}"), args.kind)
 
 

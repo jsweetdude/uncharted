@@ -1,0 +1,548 @@
+{
+ "format": "uncharted-export",
+ "version": 1,
+ "id": "sample-talks",
+ "title": "Sample talks (invented)",
+ "description": "Twelve invented talks for testing map viewers.",
+ "exported": "2026-10-28T12:00:00Z",
+ "manifest": {
+  "generator": {
+   "name": "uncharted",
+   "version": "1.0.0.dev0"
+  },
+  "corpus": {
+   "kind": "talk",
+   "topic": "captions and audio description (invented sample)",
+   "sources": [
+    {
+     "name": "Invented sample",
+     "url": "https://example.org/talks/",
+     "query": "none: written by hand to test viewers",
+     "retrieved": "2026-10-28",
+     "items": 12,
+     "license": "CC0-1.0",
+     "attribution": "Invented for testing; these talks do not exist."
+    }
+   ],
+   "cleaning": [
+    "No cleaning: the sample was written by hand."
+   ],
+   "popularity": "Not used in this sample.",
+   "tags": "Invented labels.",
+   "fingerprint": "8ccad8a282a123ca594389ee4abb7b5a"
+  },
+  "map": {
+   "neighbors": 10,
+   "seed": 42,
+   "layout": "2-d UMAP, cosine",
+   "clustering": "HDBSCAN on a 10-d UMAP, min cluster size 2"
+  },
+  "candidates": {
+   "connections": 1,
+   "pairs": 1,
+   "blends": 1,
+   "targetPct": 90,
+   "placePct": 90,
+   "placeNeighbors": 8,
+   "placeSpread": 0.3,
+   "method": "connections-v1",
+   "band": "75th to 97th percentile of neighborhood similarity",
+   "mixesPerPair": 200,
+   "pairsTested": 3,
+   "ringSize": 10,
+   "simBins": 10,
+   "densityBins": 5,
+   "tailPct": 5,
+   "alpha": 0.05,
+   "pairCutoff": 0.0167,
+   "maxBusiest": 0.4,
+   "seed": 42
+  }
+ },
+ "stats": {
+  "items": 12,
+  "neighborhoods": 3,
+  "unclustered": 2,
+  "candidates": 3,
+  "drafts": 2,
+  "nn1Percentiles": {
+   "1": 0.584,
+   "5": 0.602,
+   "10": 0.634,
+   "25": 0.76,
+   "50": 0.81,
+   "75": 0.85,
+   "90": 0.868,
+   "95": 0.87,
+   "99": 0.87
+  }
+ },
+ "lookups": {
+  "venues": [
+   "Sample Conference",
+   "Sample Journal"
+  ],
+  "urlPrefixes": [
+   "https://example.org/talks/",
+   "https://"
+  ]
+ },
+ "items": {
+  "count": 12,
+  "id": [
+   "sample:1",
+   "sample:2",
+   "sample:3",
+   "sample:4",
+   "sample:5",
+   "sample:6",
+   "sample:7",
+   "sample:8",
+   "sample:9",
+   "sample:10",
+   "sample:11",
+   "sample:12"
+  ],
+  "title": [
+   "Live captions for town council meetings",
+   "Caption timing in fast dialogue scenes",
+   "Speaker labels in group captions",
+   "Reading speeds for children's captions",
+   "Extended audio description for lectures",
+   "Describing on-screen text in news broadcasts",
+   "Audio description scripts written by volunteers",
+   "Synthetic voices for audio description",
+   "Sound cues as visual indicators in shooters",
+   "Subtitles for game cutscenes and menus",
+   "Haptic alerts for doorbells and alarms",
+   "Plain-language summaries of court rulings"
+  ],
+  "x": [
+   0.18,
+   0.24,
+   0.12,
+   0.28,
+   0.7,
+   0.76,
+   0.64,
+   0.8,
+   0.48,
+   0.56,
+   1.0,
+   0.0
+  ],
+  "y": [
+   0.72,
+   0.8,
+   0.66,
+   0.62,
+   0.78,
+   0.86,
+   0.7,
+   0.7,
+   0.22,
+   0.16,
+   0.4,
+   0.0
+  ],
+  "cluster": [
+   0,
+   0,
+   0,
+   0,
+   1,
+   1,
+   1,
+   1,
+   2,
+   2,
+   -1,
+   -1
+  ],
+  "nn1": [
+   0.84,
+   0.87,
+   0.87,
+   0.79,
+   0.82,
+   0.85,
+   0.85,
+   0.8,
+   0.76,
+   0.76,
+   0.62,
+   0.58
+  ],
+  "lonely": [
+   36.4,
+   0.0,
+   0.0,
+   63.6,
+   45.5,
+   18.2,
+   18.2,
+   54.5,
+   72.7,
+   72.7,
+   90.9,
+   100.0
+  ],
+  "year": [
+   2021,
+   2022,
+   2023,
+   2024,
+   2020,
+   2022,
+   2023,
+   2025,
+   2024,
+   2025,
+   null,
+   2019
+  ],
+  "venue": [
+   0,
+   0,
+   0,
+   1,
+   0,
+   1,
+   0,
+   -1,
+   0,
+   0,
+   1,
+   1
+  ],
+  "urlPrefix": [
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   1,
+   -1
+  ],
+  "url": [
+   "1",
+   "2",
+   "3",
+   "4",
+   "5",
+   "6",
+   "7",
+   "8",
+   "9",
+   "10",
+   "example.com/haptics",
+   ""
+  ],
+  "snippet": [
+   "Our town council asked for live captions in its public meetings. We share what it took…",
+   "Fast dialogue breaks caption timing rules. We tested three timing strategies with deaf viewers…",
+   "Group conversations need speaker labels. We compared names, colors and positions…",
+   "Children read captions more slowly than adults. We measured reading speeds by age…",
+   "Lectures leave little room for description. Extended description pauses the video…",
+   "News broadcasts put text on screen that blind viewers miss. We described it in the gaps…",
+   "Volunteers wrote audio description scripts for a regional theater. Here is how we trained them…",
+   "Synthetic voices can read description scripts. We compared them with human narrators…",
+   "Shooters signal danger with sound. We turned the key sounds into visual indicators…",
+   "Cutscenes and menus often lack subtitles. We audited thirty games…",
+   "Doorbells and alarms can buzz a phone or a wristband. We tested patterns deaf households prefer…",
+   "Court rulings are hard to read. We wrote plain-language summaries and tested them…"
+  ],
+  "source": [
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0
+  ]
+ },
+ "neighborhoods": [
+  {
+   "id": 0,
+   "terms": [
+    "captions",
+    "caption",
+    "speaker",
+    "timing"
+   ],
+   "tags": [
+    "Deaf",
+    "captions"
+   ],
+   "size": 4,
+   "x": 0.205,
+   "y": 0.7,
+   "density": 0.855,
+   "popularity": 0,
+   "slot": 0,
+   "examples": [
+    1,
+    0,
+    2
+   ]
+  },
+  {
+   "id": 1,
+   "terms": [
+    "description",
+    "audio",
+    "scripts"
+   ],
+   "tags": [
+    "blind",
+    "audio description"
+   ],
+   "size": 4,
+   "x": 0.725,
+   "y": 0.76,
+   "density": 0.835,
+   "popularity": 0,
+   "slot": 1,
+   "examples": [
+    6,
+    4,
+    5
+   ]
+  },
+  {
+   "id": 2,
+   "terms": [
+    "game",
+    "subtitles",
+    "sound"
+   ],
+   "tags": [
+    "games"
+   ],
+   "size": 2,
+   "x": 0.52,
+   "y": 0.19,
+   "density": 0.76,
+   "popularity": 0,
+   "slot": 2,
+   "examples": [
+    8,
+    9
+   ]
+  }
+ ],
+ "candidates": [
+  {
+   "id": "captions-x-description",
+   "code": "C1",
+   "kind": "connection",
+   "label": "captions × audio description",
+   "headline": "Between neighborhood 0 (captions) and neighborhood 1 (audio description)",
+   "score": {
+    "nn1": 0.61,
+    "lonely": 91.7,
+    "mixNn1": 0.58,
+    "baseline": 0.64,
+    "margin": 0.06,
+    "beats": 97.0,
+    "pairTail": 16.0,
+    "pairP": 0.0001
+   },
+   "targetPct": 90,
+   "stop": "target reached",
+   "neighborhoods": [
+    0,
+    1
+   ],
+   "parents": [
+    1,
+    6
+   ],
+   "nearest": [
+    [
+     1,
+     0.61
+    ],
+    [
+     6,
+     0.6
+    ],
+    [
+     2,
+     0.57
+    ],
+    [
+     4,
+     0.55
+    ]
+   ],
+   "tags": [
+    "captions",
+    "audio description"
+   ],
+   "brief": "# Brief: captions × audio description\n\nWrite a talk title and a 120 to 200 word abstract that joins the two neighborhoods.\n\n## Must not copy\n\n- 0.610 Caption timing in fast dialogue scenes\n- 0.600 Audio description scripts written by volunteers\n",
+   "drafts": [
+    {
+     "id": "captions-x-description.d1",
+     "code": "d1",
+     "title": "One script for captions and audio description",
+     "text": "Caption files and audio description scripts are written by different people from the same picture, and they drift apart: a sound the captions name is a sound the description talks over. We merged them into one timed script with three kinds of line, for speech, for sound and for picture, and let each output take the lines it needs. This talk shows the format, the review workflow and what changed for viewers who use both.",
+     "notes": "Helps: deafblind viewers and anyone using captions and description together\nBarrier: two scripts that contradict each other\nStandard: WCAG 2.2 success criteria 1.2.2 and 1.2.5",
+     "verdict": "pass",
+     "nn1": 0.6,
+     "lonely": 91.7,
+     "toCandidate": 0.83,
+     "reasons": [],
+     "nearest": [
+      [
+       1,
+       0.6
+      ],
+      [
+       6,
+       0.59
+      ],
+      [
+       2,
+       0.56
+      ]
+     ],
+     "checked": "2026-10-28T12:00:00Z",
+     "x": 0.3365,
+     "y": 0.7215
+    }
+   ],
+   "x": 0.4222,
+   "y": 0.7353,
+   "spread": 0.2544
+  },
+  {
+   "id": "description-x-games",
+   "code": "P1",
+   "kind": "pair",
+   "label": "audio description × games",
+   "headline": "Between neighborhood 1 (audio description) and neighborhood 2 (games)",
+   "score": {
+    "nn1": 0.66,
+    "lonely": 83.3
+   },
+   "targetPct": 90,
+   "stop": "drift limit",
+   "neighborhoods": [
+    1,
+    2
+   ],
+   "parents": [
+    6,
+    9
+   ],
+   "nearest": [
+    [
+     7,
+     0.66
+    ],
+    [
+     9,
+     0.64
+    ],
+    [
+     8,
+     0.61
+    ]
+   ],
+   "tags": [
+    "audio description",
+    "games"
+   ],
+   "brief": "# Brief: audio description × games\n\nWrite a talk title and abstract between the two neighborhoods.\n",
+   "drafts": [],
+   "x": 0.6174,
+   "y": 0.3658,
+   "spread": 0.2797
+  },
+  {
+   "id": "haptics-x-sound-cues",
+   "code": "B1",
+   "kind": "blend",
+   "label": "doorbell haptics × sound cues",
+   "headline": "Blend of two items",
+   "score": {
+    "nn1": 0.7,
+    "lonely": 83.3
+   },
+   "targetPct": 90,
+   "stop": "max steps",
+   "neighborhoods": [
+    2
+   ],
+   "parents": [
+    10,
+    8
+   ],
+   "nearest": [
+    [
+     8,
+     0.7
+    ],
+    [
+     10,
+     0.69
+    ],
+    [
+     11,
+     0.62
+    ],
+    [
+     9,
+     0.6
+    ]
+   ],
+   "tags": [
+    "games",
+    "haptics"
+   ],
+   "drafts": [
+    {
+     "id": "haptics-x-sound-cues.d1",
+     "code": "d1",
+     "title": "Doorbell haptics for game sound cues",
+     "text": "Games show sound cues as icons at the edge of the screen. We tried the vibration patterns deaf households already know from doorbell and alarm alerts instead, so a player feels footsteps behind them as the pattern for the front door.",
+     "verdict": "retry",
+     "nn1": 0.81,
+     "lonely": 50.0,
+     "toCandidate": 0.71,
+     "reasons": [
+      "too close: nearest real item at 0.810 (target ≤ 0.700)"
+     ],
+     "nearest": [
+      [
+       8,
+       0.81
+      ],
+      [
+       9,
+       0.7
+      ]
+     ],
+     "checked": "2026-10-28T12:05:00-06:00",
+     "x": 0.5171,
+     "y": 0.1922
+    }
+   ],
+   "x": null,
+   "y": null,
+   "spread": 0.3827
+  }
+ ]
+}

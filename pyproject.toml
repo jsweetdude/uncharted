@@ -1,0 +1,22 @@
+[project]
+name = "uncharted"
+version = "1.0.0.dev0"
+description = "Map a field's writing by meaning, find candidate connections nobody has written about, and export the map for a viewer."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "scikit-learn>=1.3",
+    "umap-learn>=0.5",
+]
+
+[project.optional-dependencies]
+# Embedding on this machine. API providers need neither.
+local = [
+    "torch>=2.8",
+    "sentence-transformers>=5",
+]
+
+[tool.uv]
+package = false

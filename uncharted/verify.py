@@ -16,6 +16,7 @@ Results are appended to <candidate>.verify.json so the attempts are kept.
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 import time
@@ -30,35 +31,13 @@ import torch  # noqa: E402
 from sentence_transformers import SentenceTransformer  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # `python -I` leaves the script's directory off sys.path
+from drafts import embedded_text, read_candidate  # noqa: E402
 from gaps import Space  # noqa: E402
+from provenance import corpus_fingerprint, text_sha256  # noqa: E402
 
 
 def log(msg: str) -> None:
     print(time.strftime("%H:%M:%S"), msg, flush=True)
-
-
-def read_candidate(path: str) -> tuple[str, str, str]:
-    """Return (title, body, notes). Everything after a line that is exactly '---' is notes
-    (the value check: who is helped, what barrier, which standard) and is not embedded."""
-    with open(path, encoding="utf-8") as fh:
-        lines = [ln.rstrip("\n") for ln in fh]
-    title = ""
-    body_lines: list[str] = []
-    notes_lines: list[str] = []
-    in_notes = False
-    for ln in lines:
-        if not title and ln.startswith("# "):
-            title = ln[2:].strip()
-            continue
-        if ln.strip() == "---":
-            in_notes = True
-            continue
-        (notes_lines if in_notes else body_lines).append(ln)
-    body = " ".join(" ".join(body_lines).split())
-    notes = "\n".join(ln for ln in notes_lines if ln.strip())
-    if not title:
-        raise SystemExit(f"{path}: first line must be '# Title'")
-    return title, body, notes
 
 
 def main() -> None:
@@ -89,11 +68,16 @@ def main() -> None:
     model = SentenceTransformer(model_info["model"], device=device, model_kwargs=model_kwargs)
     model.max_seq_length = model_info.get("max_seq_length", 512)
 
-    parsed = [read_candidate(p) for p in args.candidates]
-    vecs = model.encode([f"{t}. {b}" for t, b, _ in parsed], normalize_embeddings=True, convert_to_numpy=True, show_progress_bar=False).astype(np.float32)
+    try:
+        parsed = [read_candidate(p) for p in args.candidates]
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from None
+    fingerprint = corpus_fingerprint(space.meta, model_info)
+    texts = [embedded_text(t, b) for t, b, _ in parsed]
+    vecs = model.encode(texts, normalize_embeddings=True, convert_to_numpy=True, show_progress_bar=False).astype(np.float32)
 
     print(f"\ncorpus {space.name}: {space.n()} items; target nn1 ≤ {target_sim:.3f} (lonelier than {target_pct:.0f}%)\n")
-    for path, (title, body, notes), v in zip(args.candidates, parsed, vecs):
+    for path, (title, body, notes), text, v in zip(args.candidates, parsed, texts, vecs):
         near = space.nearest(v, args.k)
         nn1 = near[0][1]
         pct = space.lonely_pct(nn1)
@@ -101,6 +85,8 @@ def main() -> None:
         result = {
             "candidate": path,
             "corpus": space.name,
+            "corpus_fingerprint": fingerprint,
+            "text_sha256": text_sha256(text),
             "gap": args.gap,
             "title": title,
             "notes": notes,
@@ -111,7 +97,7 @@ def main() -> None:
             "target_pct": target_pct,
             "nearest": [{"id": space.meta[i]["id"], "sim": s, "title": space.meta[i]["title"], "year": space.meta[i].get("year"), "venue": space.meta[i].get("venue"), "url": space.meta[i].get("url")} for i, s in near],
             "neighborhoods": [{"cluster": c, "sim": s, "label": space.cluster_label(c)} for c, s in clusters],
-            "checked_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "checked_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
         }
         on_target = True
         if gap is not None:
