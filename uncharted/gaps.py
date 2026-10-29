@@ -8,11 +8,19 @@ blend: average the parents' vectors, then push the point away from every item in
 corpus, tethered to the blend so it stays specific, until it is lonelier than
 --target-pct of the corpus or has drifted as far from the blend as --max-drift allows.
 
-holes: find empty regions of the flat 2-D map with items on (nearly) every side, anchor
-a point on the ring of items around each hole, and push the same way.
+connections: for every pair of related neighborhoods, mix random items from the two and keep
+the pairs whose mixtures are emptier than chance, against mixtures matched on how similar
+their parents are and how crowded their region is; push each kept pair's emptiest mixture
+the same way. This is version 1's way of finding candidates (see cmd_connections).
 
-Both write <out>.json (the measurements) and <out>.md (the brief a writer works from).
-Needs the files space.py writes (items, clusters, centroids, umap2d).
+pairs: rank related pairs of neighborhoods by how empty the midpoint of their centroids is.
+
+holes: find empty regions of the flat 2-D map with items on (nearly) every side, anchor
+a point on the ring of items around each hole, and push the same way. Version 0 only: the
+flat map can hide real gaps and invent false ones, and export.py leaves holes out.
+
+Each writes <out>.json (the measurements) and <out>.md (the brief a writer works from).
+Needs the files space.py writes (items, clusters, centroids, umap2d, nn).
 """
 
 from __future__ import annotations
@@ -210,11 +218,21 @@ KIND_INSTRUCTIONS = {
 }
 
 
+def effective_target(d: dict) -> tuple[float, float]:
+    """(percent, similarity) a draft for this gap must reach. When the push stopped short of the
+    target percentile, a draft is asked to be as lonely as the spot itself, not lonelier."""
+    if d["gap_lonely_pct"] < d["target_pct"]:
+        return d["gap_lonely_pct"], d["gap_nn1"]
+    return d["target_pct"], d["target_sim"]
+
+
 def brief_markdown(d: dict, kind: str) -> str:
     lines = [f"# Gap brief — {d['corpus']} ({d['how']})", ""]
+    pct, sim = effective_target(d)
+    short = " The push stopped before the {:.0f}% target, so a draft only has to be as lonely as this spot.".format(d["target_pct"]) if pct < d["target_pct"] else ""
     lines.append(
         f"Corpus: {d['corpus_items']} items; typical item sits at {d['corpus_nn1_median']:.3f} similarity to its nearest neighbor. "
-        f"Target for a new item: nearest-neighbor similarity ≤ {d['target_sim']:.3f} (lonelier than {d['target_pct']:.0f}% of the corpus)."
+        f"Target for a new item: nearest-neighbor similarity ≤ {sim:.3f} (lonelier than {pct:.0f}% of the corpus).{short}"
     )
     lines.append("")
     lines.append("## Where the gap sits")
@@ -363,6 +381,19 @@ def cmd_holes(args: argparse.Namespace) -> None:
         write_out(d, os.path.join(args.out_dir, f"hole-{k:02d}"), args.kind)
 
 
+def related_band(C: np.ndarray, band: list[float], lo_abs: float | None = None, hi_abs: float | None = None) -> tuple[float, float, list[tuple[int, int, float]]]:
+    """Pairs of neighborhoods whose centroid similarity lies in the related band: between the
+    given percentiles of all pairs' similarities (or absolute bounds, when given). Related
+    enough to combine meaningfully, not so similar that they are one topic."""
+    k = len(C)
+    csim = C @ C.T
+    upper = csim[np.triu_indices(k, 1)]
+    lo = float(np.percentile(upper, band[0])) if lo_abs is None else lo_abs
+    hi = float(np.percentile(upper, band[1])) if hi_abs is None else hi_abs
+    pairs = [(a, b, float(csim[a, b])) for a in range(k) for b in range(a + 1, k) if lo <= csim[a, b] <= hi]
+    return lo, hi, pairs
+
+
 def cmd_pairs(args: argparse.Namespace) -> None:
     """Rank related pairs of neighborhoods by how empty the space between them is."""
     space = Space(args.dir, args.name)
@@ -370,24 +401,18 @@ def cmd_pairs(args: argparse.Namespace) -> None:
     k = len(C)
     if k < 2:
         raise SystemExit("need at least two neighborhoods; run space.py with a smaller --min-cluster-size")
-    csim = C @ C.T
-    upper = csim[np.triu_indices(k, 1)]
-    log(f"{k} neighborhoods; centroid similarity between pairs: p10 {np.percentile(upper,10):.3f} median {np.median(upper):.3f} p90 {np.percentile(upper,90):.3f}")
+    lo, hi, pairs = related_band(C, args.band, args.min_related, args.max_related)
     allowed = set(args.only) if args.only else None
-    pairs = [
-        (a, b, float(csim[a, b]))
-        for a in range(k)
-        for b in range(a + 1, k)
-        if args.min_related <= csim[a, b] <= args.max_related and (allowed is None or (a in allowed and b in allowed))
-    ]
+    pairs = [(a, b, s) for a, b, s in pairs if allowed is None or (a in allowed and b in allowed)]
+    log(f"{k} neighborhoods; related band {lo:.3f}-{hi:.3f} centroid similarity")
     if not pairs:
-        raise SystemExit("no pairs in the --min-related/--max-related band (or none among --only); widen it")
+        raise SystemExit("no pairs in the related band (or none among --only); widen --band")
     M = np.array([unit(C[a] + C[b]) for a, b, _ in pairs], dtype=np.float32)
     mid_nn1 = np.zeros(len(pairs), dtype=np.float32)
     for s0 in range(0, len(pairs), 512):
         mid_nn1[s0 : s0 + 512] = (M[s0 : s0 + 512] @ space.X.T).max(axis=1)
     ranked = sorted(range(len(pairs)), key=lambda i: float(mid_nn1[i]))[: args.top]
-    log(f"{len(pairs)} related pairs (centroid similarity {args.min_related}–{args.max_related}); emptiest midpoints first:")
+    log(f"{len(pairs)} related pairs (centroid similarity {lo:.3f}-{hi:.3f}); emptiest midpoints first:")
     for i in ranked:
         a, b, s = pairs[i]
         print(f"  midpoint nn1 {mid_nn1[i]:.3f} (lonelier than {space.lonely_pct(float(mid_nn1[i])):5.1f}%)  related {s:.3f}  {space.cluster_label(a)}  +  {space.cluster_label(b)}")
@@ -408,14 +433,158 @@ def cmd_pairs(args: argparse.Namespace) -> None:
         p0 = M[i]
         p, info = repel(space, p0, target_sim, max_drift=args.max_drift, tau=args.tau, tether=args.tether, lr=args.lr, steps=args.steps)
         d = describe(space, p0, p, [central[a], central[b]], info, args.target_pct, f"blend of neighborhoods #{a} + #{b}")
-        d["pair"] = {"a": a, "b": b, "centroid_sim": s, "midpoint_nn1": float(mid_nn1[i]), "min_related": args.min_related, "max_related": args.max_related}
+        d["pair"] = {"a": a, "b": b, "centroid_sim": s, "midpoint_nn1": float(mid_nn1[i]), "min_related": lo, "max_related": hi}
         write_out(d, os.path.join(args.out_dir, f"pair-{n:02d}-c{a}-c{b}"), args.kind)
+
+
+def binomial_sf(k: int, n: int, p: float) -> float:
+    """P(X >= k) for X ~ Binomial(n, p)."""
+    if k <= 0:
+        return 1.0
+    return float(min(1.0, sum(math.comb(n, j) * p**j * (1 - p) ** (n - j) for j in range(k, n + 1))))
+
+
+def quantile_bins(values: np.ndarray, k: int) -> np.ndarray:
+    edges = np.quantile(values, np.linspace(0, 1, k + 1))
+    return np.clip(np.searchsorted(edges, values, side="right") - 1, 0, k - 1)
+
+
+def cmd_connections(args: argparse.Namespace) -> None:
+    """Candidate connections: combinations of two related neighborhoods emptier than chance.
+
+    1. For every pair of neighborhoods in the related band, draw --mixes random parent pairs
+       (one item from each) and mix them with equal weights.
+    2. Score each mixture by its nearest real item, leaving out its two parents and their
+       --ring nearest neighbors: a mixture sits close to those by construction.
+    3. Mixing always lands somewhere fairly empty, and how empty depends on how similar the
+       parents are and how crowded their region is. So each mixture is ranked only against
+       mixtures in the same matched group (quantile bins of parent similarity crossed with
+       bins of the parents' mean nn1), pooled over every related pair: `beats` is the share of
+       its group that is less empty.
+    4. A pair of neighborhoods passes when more of its mixtures fall in the emptiest --tail
+       percent of their groups than chance allows (binomial tail, Bonferroni-corrected over
+       the pairs tested) and no single parent supplies more than --max-busiest of them.
+    5. Each passing pair's emptiest tail mixture is pushed into the nearest empty space, as a
+       blend is, and written with its evidence for export.py.
+    """
+    space = Space(args.dir, args.name)
+    ring_all = np.load(os.path.join(args.dir, args.name + ".nn.npz"))["idx"]
+    ring = ring_all[:, : min(args.ring, ring_all.shape[1])]
+    labels = np.array([it["cluster"] for it in space.items])
+    if len(space.centroids) < 2:
+        raise SystemExit("need at least two neighborhoods; run space.py with a smaller --min-cluster-size")
+    lo, hi, pairs = related_band(space.centroids, args.band)
+    if not pairs:
+        raise SystemExit("no pairs of neighborhoods in the related band; widen --band")
+    members = {c: np.where(labels == c)[0] for c in range(len(space.centroids))}
+    m = int(min(args.mixes, max(20, args.max_mixtures // len(pairs))))
+    rng = np.random.default_rng(args.seed)
+    rows = np.concatenate([np.column_stack([np.full(m, pi), rng.choice(members[a], m), rng.choice(members[b], m)]) for pi, (a, b, _) in enumerate(pairs)])
+    X = space.X
+    t0 = time.time()
+    mix_nn1 = np.empty(len(rows), dtype=np.float32)
+    for start in range(0, len(rows), args.chunk):
+        part = rows[start : start + args.chunk]
+        P = X[part[:, 1]] + X[part[:, 2]]
+        P /= np.linalg.norm(P, axis=1, keepdims=True)
+        S = P @ X.T
+        np.put_along_axis(S, np.concatenate([part[:, 1:3], ring[part[:, 1]], ring[part[:, 2]]], axis=1), -2.0, axis=1)
+        mix_nn1[start : start + args.chunk] = S.max(axis=1)
+    parent_sim = np.einsum("ij,ij->i", X[rows[:, 1]], X[rows[:, 2]])
+    density = (space.nn1[rows[:, 1]] + space.nn1[rows[:, 2]]) / 2
+    groups = quantile_bins(parent_sim, args.sim_bins) * args.density_bins + quantile_bins(density, args.density_bins)
+    baseline = np.zeros(len(rows), dtype=np.float32)
+    beats = np.zeros(len(rows), dtype=np.float32)
+    for g in np.unique(groups):
+        idx = np.where(groups == g)[0]
+        vals = mix_nn1[idx]
+        ranked = np.sort(vals)
+        baseline[idx] = np.median(vals)
+        higher = len(vals) - np.searchsorted(ranked, vals, side="right")  # less empty; ties are not
+        beats[idx] = 100.0 * higher / max(len(vals) - 1, 1)
+    tail = beats >= 100 - args.tail
+    log(f"{len(pairs)} related pairs (centroid similarity {lo:.3f}-{hi:.3f}) x {m} mixtures = {len(rows)}, scored in {time.time() - t0:.0f}s; "
+        f"mixture nn1 without parents and rings: median {np.median(mix_nn1):.3f}; {100 * tail.mean():.1f}% in the {args.tail:g}% tail")
+
+    cutoff = args.alpha / len(pairs)
+    table = []
+    for pi, (a, b, csim) in enumerate(pairs):
+        mine = np.where(rows[:, 0] == pi)[0]
+        hits = mine[tail[mine]]
+        busiest = 0.0
+        if len(hits):
+            busiest = max(np.unique(rows[hits, 1], return_counts=True)[1].max(), np.unique(rows[hits, 2], return_counts=True)[1].max()) / len(hits)
+        p = binomial_sf(len(hits), m, args.tail / 100)
+        best = int(hits[np.argmax(baseline[hits] - mix_nn1[hits])]) if len(hits) else None
+        table.append({"a": a, "b": b, "centroid_sim": csim, "tail": int(len(hits)), "mixes": m, "p": p, "busiest": float(busiest), "best": best,
+                      "passes": bool(len(hits) and p < cutoff and busiest <= args.max_busiest)})
+    table.sort(key=lambda t: (not t["passes"], t["p"], -t["tail"]))
+    passing = [t for t in table if t["passes"]]
+    print(f"\n{len(passing)} of {len(pairs)} pairs pass (binomial p < {cutoff:.2g} after Bonferroni, no parent in more than {100 * args.max_busiest:.0f}% of the tail mixtures):")
+    for t in table[: max(len(passing), 0) + 5]:
+        mark = "PASS" if t["passes"] else "    "
+        print(f"  {mark} {space.cluster_label(t['a'])} + {space.cluster_label(t['b'])}: tail {t['tail']}/{m} ({100 * t['tail'] / m:.0f}%), p {t['p']:.1e}, busiest parent {100 * t['busiest']:.0f}%")
+
+    method = {
+        "method": "connections-v1",
+        "band": f"{args.band[0]:g}th to {args.band[1]:g}th percentile of neighborhood similarity ({lo:.3f} to {hi:.3f})",
+        "mixesPerPair": m,
+        "pairsTested": len(pairs),
+        "ringSize": int(ring.shape[1]),
+        "simBins": args.sim_bins,
+        "densityBins": args.density_bins,
+        "tailPct": args.tail,
+        "alpha": args.alpha,
+        "pairCutoff": float(f"{cutoff:.3g}"),
+        "maxBusiest": args.max_busiest,
+        "minTargetLonely": args.min_target_lonely,
+        "seed": args.seed,
+    }
+    os.makedirs(args.out_dir, exist_ok=True)
+    with open(os.path.join(args.out_dir, "pairs.json"), "w", encoding="utf-8") as fh:
+        json.dump({"corpus": space.name, "method": method, "pairs": [{k2: v for k2, v in t.items() if k2 != "best"} for t in table]}, fh, indent=1)
+    if not args.briefs:
+        return
+    target_sim = space.sim_for_pct(args.target_pct)
+    chosen: list[np.ndarray] = []
+    written = 0
+    for t in passing:
+        if written >= args.top:
+            break
+        i = t["best"]
+        a_item, b_item = int(rows[i, 1]), int(rows[i, 2])
+        p0 = unit(X[a_item] + X[b_item])
+        if any(float(p0 @ q) > 0.95 for q in chosen):
+            continue
+        chosen.append(p0)
+        p, info = repel(space, p0, target_sim, max_drift=args.max_drift, tau=args.tau, tether=args.tether, lr=args.lr, steps=args.steps)
+        d = describe(space, p0, p, [a_item, b_item], info, args.target_pct, f"connection between neighborhoods #{t['a']} and #{t['b']}")
+        if d["gap_lonely_pct"] < args.min_target_lonely:
+            log(f"skip #{t['a']} + #{t['b']}: pushed as far as allowed, its spot is still only lonelier than {d['gap_lonely_pct']:.0f}% of the corpus")
+            continue
+        d["connection"] = {
+            "a": t["a"],
+            "b": t["b"],
+            "centroid_sim": t["centroid_sim"],
+            "parent_sim": float(parent_sim[i]),
+            "mix_nn1": float(mix_nn1[i]),
+            "baseline": float(baseline[i]),
+            "margin": float(baseline[i] - mix_nn1[i]),
+            "beats": float(beats[i]),
+            "pair_tail": 100.0 * t["tail"] / m,
+            "pair_tail_count": t["tail"],
+            "pair_p": t["p"],
+            "busiest": t["busiest"],
+            "method": method,
+        }
+        written += 1
+        write_out(d, os.path.join(args.out_dir, f"connection-{written:02d}-c{t['a']}-c{t['b']}"), args.kind)
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("blend", "holes", "pairs"):
+    for name in ("blend", "holes", "pairs", "connections"):
         sp = sub.add_parser(name)
         sp.add_argument("--name", required=True)
         sp.add_argument("--dir", default="data/embeddings")
@@ -439,13 +608,30 @@ def main() -> None:
     h.add_argument("--out-dir", default="data/gaps/holes")
     pr = sub.choices["pairs"]
     pr.add_argument("--top", type=int, default=15)
-    pr.add_argument("--min-related", type=float, default=0.60, help="ignore pairs of neighborhoods less similar than this (mush)")
-    pr.add_argument("--max-related", type=float, default=0.85, help="ignore pairs more similar than this (same topic)")
+    pr.add_argument("--band", type=float, nargs=2, default=[75, 97], metavar=("LOW", "HIGH"), help="related band: percentiles of the similarity between every pair of neighborhood centroids")
+    pr.add_argument("--min-related", type=float, help="absolute lower bound on centroid similarity, instead of the band's low percentile")
+    pr.add_argument("--max-related", type=float, help="absolute upper bound on centroid similarity, instead of the band's high percentile")
     pr.add_argument("--only", nargs="*", type=int, help="consider only pairs where both neighborhoods are in this list")
     pr.add_argument("--briefs", action="store_true", help="also push each midpoint into the gap and write a brief")
     pr.add_argument("--out-dir", default="data/gaps/pairs")
+    cn = sub.choices["connections"]
+    cn.add_argument("--band", type=float, nargs=2, default=[75, 97], metavar=("LOW", "HIGH"), help="related band: percentiles of the similarity between every pair of neighborhood centroids")
+    cn.add_argument("--mixes", type=int, default=200, help="random mixtures per pair of neighborhoods")
+    cn.add_argument("--max-mixtures", type=int, default=200000, help="cap on all mixtures; fewer per pair when many pairs are related")
+    cn.add_argument("--ring", type=int, default=10, help="leave out each parent's this many nearest neighbors when scoring a mixture")
+    cn.add_argument("--sim-bins", type=int, default=10, help="quantile bins of parent similarity for matching")
+    cn.add_argument("--density-bins", type=int, default=5, help="quantile bins of the parents' mean nn1 for matching")
+    cn.add_argument("--tail", type=float, default=5.0, help="percent of each matched group counted as its emptiest tail")
+    cn.add_argument("--alpha", type=float, default=0.05, help="family-wise error rate, split over the pairs tested")
+    cn.add_argument("--max-busiest", type=float, default=0.4, help="a pair fails when one parent supplies more than this share of its tail mixtures")
+    cn.add_argument("--top", type=int, default=12, help="most candidates to write")
+    cn.add_argument("--min-target-lonely", type=float, default=50.0, help="drop a candidate whose pushed spot is lonelier than less than this percent of the corpus")
+    cn.add_argument("--seed", type=int, default=42)
+    cn.add_argument("--chunk", type=int, default=1024, help="mixtures scored per block (memory: chunk x corpus size x 4 bytes)")
+    cn.add_argument("--briefs", action="store_true", help="also push each passing pair's emptiest mixture into empty space and write a brief")
+    cn.add_argument("--out-dir", default="data/gaps/connections")
     args = ap.parse_args()
-    {"blend": cmd_blend, "holes": cmd_holes, "pairs": cmd_pairs}[args.cmd](args)
+    {"blend": cmd_blend, "holes": cmd_holes, "pairs": cmd_pairs, "connections": cmd_connections}[args.cmd](args)
 
 
 if __name__ == "__main__":

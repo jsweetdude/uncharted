@@ -10,7 +10,8 @@ Reads what embed.py and space.py wrote for --name, the candidate JSONs gaps.py w
 JSON document in the format schema/README.md describes, validated by schema.py before it is
 written; an --out ending in .gz is gzip-compressed. Briefs and draft text go into the file and
 no local path does, so the file can be shared as it is (--no-briefs and --no-drafts leave them
-out; --snippet-words adds the first words of every item's text).
+out; --snippet-words adds the first words of every item's text; --labels replaces the
+generated candidate labels with names a person or a model wrote, keyed by candidate id).
 
 --corpus-info names a JSON file holding the manifest's corpus section: what one item is, the
 sources with the exact query and retrieval date, the cleaning rules, and what popularity and
@@ -312,6 +313,7 @@ def main() -> None:
     ap.add_argument("--candidates", nargs="*", default=[], help="gap JSONs from gaps.py, or directories of them")
     ap.add_argument("--place-pct", type=float, default=90.0, help="draw a candidate only when its nearest items sit at least as tightly on the map as this share of real items' nearest neighbors")
     ap.add_argument("--snippet-words", type=int, default=0, help="add each item's first N words of text (0: leave them out)")
+    ap.add_argument("--labels", help="JSON file mapping candidate ids to labels that replace the generated ones")
     ap.add_argument("--no-briefs", action="store_true")
     ap.add_argument("--no-drafts", action="store_true")
     ap.add_argument("--out", required=True, help="output file; .gz compresses it")
@@ -558,7 +560,17 @@ def main() -> None:
                 cand["drafts"].append({"id": f"{cand['id']}.d{num}", "code": f"d{num}", **draft})
             cand["drafts"] = cand["drafts"][:20]
 
-    candidates.sort(key=lambda c: (KIND_ORDER[c["kind"]], -c["score"]["lonely"], c["id"]))
+    if args.labels:
+        with open(args.labels, encoding="utf-8") as fh:
+            names = json.load(fh)
+        unknown = sorted(set(names) - {c["id"] for c in candidates})
+        if unknown:
+            log(f"labels for candidates not in this map, ignored: {', '.join(unknown[:5])}")
+        for cand in candidates:
+            if text(names.get(cand["id"]), 160):
+                cand["label"] = text(names[cand["id"]], 160)
+    # connections by the strength of their pair's evidence, the others by how lonely their spot is
+    candidates.sort(key=lambda c: (KIND_ORDER[c["kind"]], c["score"].get("pairP", 1.0), -c["score"]["lonely"], c["id"]))
     ranks: collections.Counter = collections.Counter()
     for cand in candidates:
         ranks[cand["kind"]] += 1
