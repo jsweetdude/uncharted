@@ -1,0 +1,17 @@
+# Local environment and caches
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Corpora, embeddings, maps and exports never go in the repository.
+# No trailing slash, so a worktree's `data` symlink is ignored too.
+/data
+viewer/data/
+*.part
+
+# Run logs can contain request URLs with API keys
+logs/
+
+# Local review notes
+.impeccable/

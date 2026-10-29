@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Uncharted map</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Chakra+Petch:wght@500;600;700&family=Atkinson+Hyperlegible+Next:wght@400;600;700&family=Atkinson+Hyperlegible+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="porcelain.css">
+<style>
+  /* Map marks. Categorical slots and the blue sequential ramp are a validated chart palette;
+     dark steps are chosen for the dark surface, not flipped. */
+  :root {
+    --map-c1: #2a78d6; --map-c2: #eb6834; --map-c3: #1baf7a; --map-c4: #eda100;
+    --map-c5: #e87ba4; --map-c6: #008300; --map-c7: #6250d6; --map-c8: #e34948;
+    --map-seq-1: #b7d3f6; --map-seq-2: #86b6ef; --map-seq-3: #5598e7; --map-seq-4: #2a78d6;
+    --map-seq-5: #1c5cab; --map-seq-6: #104281; --map-seq-7: #0d366b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --map-c1: #3987e5; --map-c2: #d95926; --map-c3: #199e70; --map-c4: #c98500;
+      --map-c5: #d55181; --map-c6: #008300; --map-c7: #9085e9; --map-c8: #e66767;
+      --map-seq-1: #184f95; --map-seq-2: #1c5cab; --map-seq-3: #256abf; --map-seq-4: #3987e5;
+      --map-seq-5: #6da7ec; --map-seq-6: #9ec5f4; --map-seq-7: #cde2fb;
+    }
+  }
+  :root[data-theme="dark"] {
+    --map-c1: #3987e5; --map-c2: #d95926; --map-c3: #199e70; --map-c4: #c98500;
+    --map-c5: #d55181; --map-c6: #008300; --map-c7: #9085e9; --map-c8: #e66767;
+    --map-seq-1: #184f95; --map-seq-2: #1c5cab; --map-seq-3: #256abf; --map-seq-4: #3987e5;
+    --map-seq-5: #6da7ec; --map-seq-6: #9ec5f4; --map-seq-7: #cde2fb;
+  }
+
+  html, body { margin: 0; }
+  body { background: var(--pc-bg); }
+  .app { min-height: 100vh; display: flex; flex-direction: column; }
+
+  .app-head {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+    gap: var(--pc-space-3) var(--pc-space-5); padding: var(--pc-space-3) var(--pc-space-4);
+    border-bottom: 1px solid var(--pc-border); background: var(--pc-surface);
+  }
+  .app-head .title-row { display: flex; align-items: center; gap: var(--pc-space-4); flex-wrap: wrap; }
+  .corpus-switch { display: flex; align-items: center; gap: var(--pc-space-2); }
+  .corpus-switch .pc-select { width: auto; min-width: 11rem; }
+  .app-head .pc-stats { grid-template-columns: repeat(4, auto); border: 1px solid var(--pc-border); border-radius: var(--pc-radius-lg); }
+  .app-head .pc-stats > div { padding: 6px 12px; }
+
+  .layout { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--pc-space-4); padding: var(--pc-space-4); }
+  .map-panel { display: flex; flex-direction: column; gap: var(--pc-space-2); min-width: 0; }
+  .toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--pc-space-2); }
+  .toolbar .pc-seg { flex: 0 1 auto; }
+  .toolbar .pc-btn { min-width: 30px; }
+  .map-wrap {
+    position: relative; height: 62vh; min-height: 300px;
+    background: var(--pc-surface); border: 1px solid var(--pc-border); border-radius: var(--pc-radius-lg); overflow: hidden;
+  }
+  .map-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
+  .map-wrap canvas.is-dragging { cursor: grabbing; }
+  .map-wrap canvas:focus-visible { box-shadow: inset 0 0 0 2px var(--pc-cobalt); }
+  .map-hint { margin: 0; }
+  .map-stage { position: relative; display: flex; flex-direction: column; min-width: 0; }
+  .map-legend {
+    background: var(--pc-surface); border: 1px solid var(--pc-border); border-radius: var(--pc-radius-md);
+    padding: 7px 12px; font-size: var(--pc-fs-small);
+  }
+  .map-legend summary { cursor: pointer; width: fit-content; }
+  .map-legend[open] summary { margin-bottom: 8px; }
+  .map-legend .pc-hint { margin-top: 8px; }
+  .map-status {
+    position: absolute; top: 8px; left: 8px; z-index: 1; margin: 0; padding: 3px 7px;
+    background: var(--pc-surface); border: 1px solid var(--pc-border); border-radius: var(--pc-radius-sm);
+  }
+  .details h3 .mono { font-size: 0.85em; color: var(--pc-text); margin-right: 2px; }
+
+  .tooltip {
+    position: absolute; z-index: 2; max-width: min(340px, calc(100% - 16px)); pointer-events: none;
+    background: var(--pc-surface); color: var(--pc-text); border: 1px solid var(--pc-control-border); border-radius: var(--pc-radius-md);
+    padding: 6px 9px; font-size: var(--pc-fs-small); line-height: 1.4;
+  }
+  .tooltip strong { display: block; font-weight: 600; }
+  .tooltip span { display: block; color: var(--pc-muted); font-size: 12px; }
+
+  .side, .side-lists { display: flex; flex-direction: column; gap: var(--pc-space-3); min-width: 0; }
+  .side-lists > * { flex: none; }
+  .side .pc-card h2 { font-size: var(--pc-fs-h3); }
+  .card-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--pc-space-2); }
+
+  .details h3 { font-size: var(--pc-fs-h3); margin-bottom: var(--pc-space-2); overflow-wrap: anywhere; }
+  .details p { margin: 0 0 var(--pc-space-2); overflow-wrap: anywhere; }
+  .facts { display: grid; grid-template-columns: fit-content(45%) minmax(0, 1fr); gap: 4px 12px; margin: 0 0 var(--pc-space-3); font-size: var(--pc-fs-small); }
+  .facts dt { font: var(--pc-label-weight) var(--pc-fs-label)/1.6 var(--pc-font-label); text-transform: var(--pc-label-case); letter-spacing: var(--pc-label-track); color: var(--pc-muted); }
+  .facts dd { margin: 0; overflow-wrap: anywhere; }
+  .link-btn {
+    appearance: none; margin: 0; padding: 0; border: 0; background: none; cursor: pointer; text-align: left;
+    font: inherit; color: var(--pc-link); text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px;
+  }
+  .link-btn:hover { color: var(--pc-cobalt-hover); text-decoration-thickness: 2px; }
+  .sub-label { margin: var(--pc-space-3) 0 var(--pc-space-1); }
+  .tag-list { margin: 0; font-size: var(--pc-fs-small); }
+  .side .pc-card { grid-template-columns: minmax(0, 1fr); }
+
+  .row-list { list-style: none; margin: 0; padding: 0; }
+  .row-list > li + li { border-top: 1px solid var(--pc-border); }
+  .row-btn {
+    display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 2px 10px;
+    width: 100%; margin: 0; padding: 7px 14px; border: 0; border-left: 3px solid transparent;
+    background: transparent; color: var(--pc-text); font: inherit; font-size: var(--pc-fs-small); text-align: left; cursor: pointer;
+    transition: background-color var(--pc-dur-fast);
+  }
+  .row-btn:hover { background: var(--pc-fill); }
+  .row-btn[aria-pressed="true"] { background: var(--pc-cobalt-soft); border-left-color: var(--pc-cobalt); }
+  .row-btn:focus-visible { box-shadow: inset 0 0 0 2px var(--pc-cobalt); }
+  .row-btn .main { min-width: 0; }
+  .row-btn .main > span { display: block; }
+  .row-btn .sub { color: var(--pc-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row-btn .num, .mono { font-family: var(--pc-font-data); font-variant-numeric: tabular-nums; font-size: 12.5px; }
+  .row-btn .num { color: var(--pc-muted); }
+  .row-btn.two-col { grid-template-columns: minmax(0, 1fr) auto; }
+  .inline-list .row-btn { padding-inline: 0 4px; border-left: 0; }
+  .inline-list { margin-bottom: var(--pc-space-2); }
+  .list-head { display: flex; justify-content: space-between; }
+
+  .swatch { width: 12px; height: 12px; border-radius: 2px; flex: none; }
+  .marker-icon { width: 16px; height: 16px; flex: none; color: var(--pc-text); }
+  .marker-icon.focus-icon, .row-btn .rank { color: var(--pc-cobalt); }
+  .row-btn .sub .pc-badge { font-size: var(--pc-fs-label); padding: 1px 4px; margin-right: 4px; vertical-align: 1px; }
+  .row-btn .draft-code { font-size: 12px; }
+  .legend-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: var(--pc-fs-small); }
+  .legend-rows li { display: flex; align-items: center; gap: 8px; }
+  .legend-dot { flex: none; width: 16px; height: 16px; display: grid; place-items: center; }
+  .legend-dot > span { display: block; border-radius: 50%; }
+  .legend-rows .num { margin-left: auto; color: var(--pc-muted); font-family: var(--pc-font-data); font-size: 12.5px; }
+
+  .search-results { list-style: none; margin: 0; padding: 0; }
+  .find .pc-field { gap: 4px; }
+
+  .message[hidden], .tooltip[hidden], [hidden] { display: none !important; }
+
+  .details h3:focus, #details-heading:focus { outline: none; }
+  #details-heading:focus-visible { box-shadow: var(--pc-focus-ring); }
+  .details h3:focus-visible { box-shadow: var(--pc-focus-ring); }
+
+  @media (min-width: 960px) {
+    .app { height: 100vh; min-height: 0; }
+    .layout { grid-template-columns: minmax(0, 1fr) 380px; grid-template-rows: minmax(0, 1fr); min-height: 0; }
+    .map-stage { flex: 1; min-height: 0; }
+    .map-wrap { flex: 1; height: auto; min-height: 0; }
+    .map-legend {
+      position: absolute; left: 10px; bottom: 10px; z-index: 1;
+      width: min(340px, calc(100% - 20px)); max-height: calc(100% - 20px); overflow-y: auto;
+    }
+    /* two scroll regions: details on top (at most half the column), the lists below */
+    .side { min-height: 0; }
+    .details-card { flex: 0 0 50%; min-height: 0; overflow-y: auto; }
+    .side-lists { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 2px; margin: -2px; }
+  }
+  @media (max-width: 959px) {
+    .map-wrap { height: auto; aspect-ratio: 1 / 1; max-height: 75vh; }
+    .map-legend { margin-top: var(--pc-space-2); }
+  }
+  @media (max-width: 520px) {
+    .app-head .pc-stats { grid-template-columns: repeat(2, auto); width: 100%; }
+    .toolbar .pc-seg { flex: 1 1 100%; }
+  }
+</style>
+</head>
+<body class="pc" data-voice="crisp">
+<div class="app">
+  <header class="app-head">
+    <div class="title-row">
+      <h1>Uncharted map</h1>
+      <div class="corpus-switch" id="corpus-switch" hidden>
+        <label for="corpus" class="pc-label">Corpus</label>
+        <select id="corpus" class="pc-select"></select>
+      </div>
+    </div>
+    <dl class="pc-stats" id="stats" hidden>
+      <div><dt>Items</dt><dd id="stat-items">–</dd></div>
+      <div><dt>Neighborhoods</dt><dd id="stat-nb">–</dd></div>
+      <div><dt>Unclustered</dt><dd id="stat-unclustered">–</dd></div>
+      <div><dt>Gaps</dt><dd id="stat-gaps">–</dd></div>
+    </dl>
+  </header>
+
+  <div class="pc-callout pc-callout--warning message" id="message" role="alert" hidden style="margin: 16px 16px 0;">
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 15 14H1L8 1.5Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 6v3.5M8 11.5v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+    <div id="message-text"></div>
+  </div>
+
+  <main class="layout" id="layout">
+    <section class="map-panel" aria-labelledby="map-heading">
+      <h2 id="map-heading" class="pc-visually-hidden">Map</h2>
+      <div class="toolbar">
+        <div class="pc-seg" role="radiogroup" aria-label="Color points by">
+          <label><input type="radio" name="color-mode" value="neighborhood" checked><span>Neighborhood</span></label>
+          <label><input type="radio" name="color-mode" value="loneliness"><span>Loneliness</span></label>
+        </div>
+        <div class="pc-btn-row">
+          <button type="button" class="pc-btn" id="zoom-in" aria-label="Zoom in">+</button>
+          <button type="button" class="pc-btn" id="zoom-out" aria-label="Zoom out">&minus;</button>
+          <button type="button" class="pc-btn" id="zoom-reset">Fit map</button>
+        </div>
+      </div>
+      <div class="map-stage">
+        <div class="map-wrap" id="map-wrap">
+          <canvas id="map" tabindex="0" role="img" aria-label="Map"></canvas>
+          <div class="tooltip" id="tooltip" hidden></div>
+          <p class="map-status pc-label" id="map-status" role="status" hidden></p>
+        </div>
+        <details class="map-legend" id="legend-box" open>
+          <summary class="pc-label">Legend</summary>
+          <div id="legend"></div>
+        </details>
+      </div>
+      <p class="map-hint pc-hint">Drag to pan, scroll or pinch to zoom. With the map focused, arrow keys pan, + and − zoom, and 0 fits the map. Esc clears the details.</p>
+    </section>
+
+    <aside class="side" aria-label="Map details and lists">
+      <section class="pc-card details-card" id="details-card" aria-labelledby="details-heading">
+        <div class="card-head">
+          <h2 id="details-heading" tabindex="-1">Details</h2>
+          <button type="button" class="pc-btn pc-btn--ghost" id="details-clear" hidden>Clear</button>
+        </div>
+        <div class="details" id="details">
+          <p class="pc-muted">Pick a gap from the Gaps list or the map to see what surrounds it. Select any point for its details.</p>
+        </div>
+      </section>
+
+      <div class="side-lists">
+      <section class="pc-card" aria-labelledby="gaps-heading">
+        <h2 id="gaps-heading">Gaps</h2>
+        <div class="list-head pc-label" aria-hidden="true"><span>Gap</span><span>Loneliness percentile</span></div>
+        <ul class="row-list pc-flush" id="gap-list" aria-labelledby="gaps-heading"></ul>
+      </section>
+
+      <section class="pc-card" aria-labelledby="nb-heading">
+        <h2 id="nb-heading">Neighborhoods</h2>
+        <div class="list-head pc-label" aria-hidden="true"><span>Neighborhood</span><span>Items</span></div>
+        <ul class="row-list pc-flush" id="nb-list" aria-labelledby="nb-heading"></ul>
+      </section>
+
+      <section class="pc-card find" aria-labelledby="find-heading">
+        <h2 id="find-heading">Find an item</h2>
+        <div class="pc-field">
+          <label for="find" class="pc-visually-hidden">Title contains</label>
+          <input id="find" class="pc-input" type="search" placeholder="Title contains…" autocomplete="off" aria-describedby="find-status">
+          <span class="pc-hint" id="find-status" aria-live="polite"></span>
+        </div>
+        <ul class="search-results row-list pc-flush" id="find-results" aria-label="Matching items" hidden></ul>
+      </section>
+      </div>
+    </aside>
+  </main>
+  <div class="pc-visually-hidden" id="announce" aria-live="polite"></div>
+</div>
+<script src="data/index.js"></script>
+<script src="map.js"></script>
+</body>
+</html>
