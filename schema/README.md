@@ -56,18 +56,23 @@ A connection also carries the evidence it was chosen on, measured on its mixture
 - `mixNn1`: the mixture's similarity to its nearest real item, leaving out its two parents and their nearest neighbors (`ringSize` of them each), which a mixture is close to by construction.
 - `baseline`: the median `mixNn1` of the matched random mixtures. `margin` is `baseline` minus `mixNn1`, so above 0 means emptier than chance.
 - `beats`: the share of the other mixtures in its matched group whose `mixNn1` is higher; ties are not higher.
-- `pairTail`: the share of the random mixtures drawn from this pair of neighborhoods whose `beats` is at least `100 − tailPct`. Chance gives `tailPct`; a pair at four times that is empty in a way its neighbors' similarity and crowding do not explain.
-- `pairP`: the binomial probability of a `pairTail` at least that high by chance, before correcting for the number of pairs tested. Mixtures from one pair share parents, so the probability is optimistic; a pair also has to pass `maxBusiest` (no single parent in more than that share of its tail mixtures).
+- `pairTail`: the share of the random mixtures drawn from this pair of neighborhoods that fall in the emptiest `tailPct` percent of their matched groups. Around `tailPct` is ordinary; a pair at four times that is empty in a way its parents' similarity and crowding do not explain.
+- `pairP`: the chance of a tail count at least this high if mixtures were assigned to pairs at random within each matched group, with the groups' tails held fixed: an exact test (a sum of hypergeometric counts), so small groups and ties are accounted for. It is not corrected for the number of pairs tested; `manifest.candidates.pairCutoff` is the corrected bar.
+- `pairPParentsOnly`: the same test when a mixture's score leaves out only its parents. A pair that passes with the rings left out but not here may owe its emptiness to the rings hiding work that already joins the two neighborhoods.
+- `parentsA` and `parentsB`: how many different parents from each neighborhood the pair's tail mixtures use. A pair must reach `minParents` on each side (or all of a smaller neighborhood) and keep any single parent under `maxBusiest` of its tail mixtures, so one unusual item cannot carry it.
+- `mixNn1All`: the mixture's similarity to its nearest real item with nothing left out, usually one of its parents.
+
+This is an exploratory, corpus-relative signal. A passing pair says the combination is emptier than comparable combinations in this corpus; the cause can be untried work, work missing from the corpus, thin abstracts, or a combination that makes no sense.
 
 ## Candidate kinds
 
-- `connection`: a mixture of one item from each of two related neighborhoods, kept when that pair of neighborhoods is emptier than chance (`pairP` below `pairCutoff` and `maxBusiest` met), then pushed out to the nearest empty space as the writing target.
+- `connection`: a mixture of one item from each of two related neighborhoods, kept when that pair of neighborhoods is emptier than comparable pairs (`pairP` below `pairCutoff`, with enough different parents and none busiest), then pushed out to the nearest empty space as a writing target. The push is a step toward a proposal: the pair's evidence describes the mixtures before it, and `score.nn1` and `score.lonely` the point after it.
 - `pair`: the midpoint of two related neighborhoods, pushed out the same way.
 - `blend`: a mixture of chosen items or neighborhoods, pushed out the same way.
 
 The word "candidate" is deliberate. An empty spot says nothing about whether an idea is good, and every candidate needs a person's judgment and a search beyond the corpus.
 
-A file with connections records how they were found in `manifest.candidates`: `method` (the scoring method's name, `connections-v1`), `mixesPerPair`, `pairsTested`, `tailPct`, `pairCutoff` and `seed` always, and `band`, `ringSize`, `simBins`, `densityBins`, `alpha` and `maxBusiest` when they apply. Matched groups are the cross of `simBins` quantile bins of parent similarity and `densityBins` quantile bins of the parents' mean `nn1`, over every mixture from every related pair.
+A file with connections records how they were found in `manifest.candidates`: `method` (the scoring method's name, `connections-v1`), `mixesPerPair`, `pairsTested`, `tailPct`, `pairCutoff` and `seed` always, and `band`, `ringSize`, `simBins`, `densityBins`, `test`, `alpha`, `minParents`, `maxBusiest` and `minTargetLonely` when they apply. Matched groups are the cross of `simBins` quantile bins of parent similarity and `densityBins` quantile bins of the parents' mean `nn1`, over every mixture from every related pair.
 
 ## Rules beyond the schema
 

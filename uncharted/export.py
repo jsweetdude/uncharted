@@ -10,7 +10,8 @@ Reads what embed.py and space.py wrote for --name, the candidate JSONs gaps.py w
 JSON document in the format schema/README.md describes, validated by schema.py before it is
 written; an --out ending in .gz is gzip-compressed. Briefs and draft text go into the file and
 no local path does, so the file can be shared as it is (--no-briefs and --no-drafts leave them
-out; --snippet-words adds the first words of every item's text).
+out; --snippet-words adds the first words of every item's text; --labels replaces the
+generated candidate labels with names a person or a model wrote, keyed by candidate id).
 
 --corpus-info names a JSON file holding the manifest's corpus section: what one item is, the
 sources with the exact query and retrieval date, the cleaning rules, and what popularity and
@@ -312,6 +313,7 @@ def main() -> None:
     ap.add_argument("--candidates", nargs="*", default=[], help="gap JSONs from gaps.py, or directories of them")
     ap.add_argument("--place-pct", type=float, default=90.0, help="draw a candidate only when its nearest items sit at least as tightly on the map as this share of real items' nearest neighbors")
     ap.add_argument("--snippet-words", type=int, default=0, help="add each item's first N words of text (0: leave them out)")
+    ap.add_argument("--labels", help="JSON file mapping candidate ids to labels that replace the generated ones")
     ap.add_argument("--no-briefs", action="store_true")
     ap.add_argument("--no-drafts", action="store_true")
     ap.add_argument("--out", required=True, help="output file; .gz compresses it")
@@ -458,6 +460,12 @@ def main() -> None:
                 pairTail=clip(ev["pair_tail"], 0, 100, 1),
                 pairP=sig3(ev["pair_p"]),
             )
+            if ev.get("pair_p_parents_only") is not None:
+                score["pairPParentsOnly"] = sig3(ev["pair_p_parents_only"])
+            if ev.get("parents_a") is not None:
+                score["parentsA"], score["parentsB"] = int(ev["parents_a"]), int(ev["parents_b"])
+            if ev.get("mix_nn1_all") is not None:
+                score["mixNn1All"] = clip(ev["mix_nn1_all"], -1, 1, 3)
             if isinstance(ev.get("method"), dict):
                 methods.append(ev["method"])
         cand = {
@@ -558,7 +566,19 @@ def main() -> None:
                 cand["drafts"].append({"id": f"{cand['id']}.d{num}", "code": f"d{num}", **draft})
             cand["drafts"] = cand["drafts"][:20]
 
-    candidates.sort(key=lambda c: (KIND_ORDER[c["kind"]], -c["score"]["lonely"], c["id"]))
+    if args.labels:
+        with open(args.labels, encoding="utf-8") as fh:
+            names = json.load(fh)
+        unknown = sorted(set(names) - {c["id"] for c in candidates})
+        if unknown:
+            log(f"labels for candidates not in this map, ignored: {', '.join(unknown[:5])}")
+        for cand in candidates:
+            if text(names.get(cand["id"]), 160):
+                cand["label"] = text(names[cand["id"]], 160)
+    # connections by their evidence: those that also pass with only the parents left out
+    # first, then by p; the other kinds by how lonely their spot is
+    cutoff = next((m.get("pairCutoff") for m in methods if m.get("pairCutoff") is not None), 0.0)
+    candidates.sort(key=lambda c: (KIND_ORDER[c["kind"]], c["kind"] == "connection" and c["score"].get("pairPParentsOnly", 0.0) >= cutoff, c["score"].get("pairP", 1.0), -c["score"]["lonely"], c["id"]))
     ranks: collections.Counter = collections.Counter()
     for cand in candidates:
         ranks[cand["kind"]] += 1
@@ -624,6 +644,9 @@ def main() -> None:
                     gz.write(payload)
             else:
                 fh.write(payload)
+        umask = os.umask(0)
+        os.umask(umask)
+        os.chmod(tmp, 0o666 & ~umask)  # mkstemp makes files private; a map file is meant to be read
         os.replace(tmp, args.out)
     except BaseException:
         if os.path.exists(tmp):
