@@ -12,17 +12,14 @@ import { createServer } from "node:http";
 import { readFileSync, readdirSync, existsSync, mkdirSync } from "node:fs";
 import { extname, join, dirname, normalize } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { gunzipSync, gzipSync } from "node:zlib";
+import { gunzipSync } from "node:zlib";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const SITE = join(ROOT, "viewer");
 const EXAMPLES = join(ROOT, "schema", "examples");
 const EXPECTED = JSON.parse(readFileSync(join(EXAMPLES, "expected-errors.json"), "utf8"));
-// The newest talks export, as a gzip upload; the plain file is the current one when both are present.
-const TALKS_JSON = join(ROOT, "data", "exports", "talks.json");
 const TALKS_GZ = join(ROOT, "data", "exports", "talks.json.gz");
-const TALKS_BYTES = existsSync(TALKS_JSON) ? readFileSync(TALKS_JSON) : existsSync(TALKS_GZ) ? gunzipSync(readFileSync(TALKS_GZ)) : null;
-const TALKS = TALKS_BYTES && { name: "talks.json.gz", mimeType: "application/gzip", buffer: gzipSync(TALKS_BYTES) };
+const TALKS = existsSync(TALKS_GZ) ? TALKS_GZ : null;
 const SHOTS = process.env.SCREENSHOT_DIR;
 const PERF = process.env.UNCHARTED_PERF_MAP;
 
@@ -51,7 +48,10 @@ const BASE = `http://127.0.0.1:${server.address().port}/`;
 
 const results = [];
 const check = (name, ok, detail = "") => { results.push({ name, ok, detail }); console.log(`${ok ? "ok  " : "FAIL"} ${name}${detail ? ` — ${detail}` : ""}`); };
-const browser = await chromium.launch(process.env.UNCHARTED_BROWSER_CHANNEL ? { channel: process.env.UNCHARTED_BROWSER_CHANNEL } : {});
+// UNCHARTED_BROWSER_PATH starts a given browser executable (for example a wrapper that forces the
+// native architecture); UNCHARTED_BROWSER_CHANNEL picks an installed one such as "chrome".
+const browser = await chromium.launch(process.env.UNCHARTED_BROWSER_PATH ? { executablePath: process.env.UNCHARTED_BROWSER_PATH }
+  : process.env.UNCHARTED_BROWSER_CHANNEL ? { channel: process.env.UNCHARTED_BROWSER_CHANNEL } : {});
 
 async function newPage(viewport = { width: 1440, height: 900 }, colorScheme = "light") {
   const context = await browser.newContext({ viewport, colorScheme });
@@ -101,7 +101,7 @@ const title = (page) => page.$eval("#map-title", (h) => h.textContent);
   await openFile(page, join(EXAMPLES, "small.json"));
   check("a valid file opens after a hostile one", (await title(page)) === "Sample talks (invented)" && !(await message(page)));
   if (TALKS) {
-    const talks = JSON.parse(TALKS_BYTES.toString("utf8"));
+    const talks = JSON.parse(gunzipSync(readFileSync(TALKS)).toString("utf8"));
     await openFile(page, TALKS);
     const counts = await page.evaluate(() => [document.querySelector("#stat-items").textContent, document.querySelectorAll("#cand-list button").length, document.querySelector("#map-title").textContent]);
     check("a gzip export opens and replaces the previous map", counts[0] === talks.items.count.toLocaleString("en-US") && counts[1] === talks.candidates.length && counts[2] === talks.title, counts.join(" / "));
